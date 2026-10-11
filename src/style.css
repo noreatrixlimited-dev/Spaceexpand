@@ -59,8 +59,7 @@ button {
   align-items: center;
   justify-content: center;
   padding: calc(16px + var(--safe-top)) 16px calc(16px + var(--safe-bottom));
-  background: rgba(255, 236, 244, 0.25);
-  backdrop-filter: blur(2px);
+  background: rgba(255, 236, 244, 0.35);
   z-index: 20;
   overflow-y: auto;
 }
@@ -765,6 +764,26 @@ h2 {
 @media (max-height: 560px) {
   .card {
     padding: 14px 16px;
+  }
+  h2 {
+    font-size: 24px;
+    margin-bottom: 4px;
+  }
+  .rank-row {
+    padding: 4px 12px;
+    font-size: 15px;
+  }
+  .ranking {
+    gap: 5px;
+  }
+  .my-stats div {
+    padding: 4px;
+  }
+  .my-stats b {
+    font-size: 16px;
+  }
+  .row {
+    margin-top: 8px;
   }
   .btn.big {
     margin-top: 10px;
