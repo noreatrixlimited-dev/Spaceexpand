@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffd9c7" />
+    <title>Nestnappers</title>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <div id="hud" class="hidden">
+      <div id="players"></div>
+      <div id="timer" class="pill">3:00</div>
+      <div id="topright">
+        <canvas id="minimap" width="132" height="132"></canvas>
+        <button id="pauseBtn" class="icon-btn" aria-label="Pause"><span></span><span></span></button>
+      </div>
+      <div id="power" class="pill hidden"></div>
+      <div id="toasts"></div>
+      <div id="thief-arrow" class="hidden"><div class="arrow"></div><span>Thief!</span></div>
+      <div id="dpad" class="hidden">
+        <button data-dir="0" class="up" aria-label="Up"></button>
+        <button data-dir="3" class="left" aria-label="Left"></button>
+        <button data-dir="1" class="right" aria-label="Right"></button>
+        <button data-dir="2" class="down" aria-label="Down"></button>
+      </div>
+      <div id="countdown"></div>
+    </div>
+
+    <!-- Title -->
+    <section id="title" class="screen">
+      <div class="card title-card">
+        <h1 class="logo" id="logo">Nestnappers</h1>
+        <p class="tagline">Paint land. Steal eggs. Protect your nest!</p>
+        <div class="label">Pick your blob</div>
+        <div id="colors" class="colors"></div>
+        <div class="label">Bots</div>
+        <div id="difficulty" class="segmented">
+          <button data-v="easy">Easy</button>
+          <button data-v="normal">Normal</button>
+          <button data-v="hard">Hard</button>
+        </div>
+        <button id="playBtn" class="btn big primary">Play</button>
+        <div class="row">
+          <button id="howBtn" class="btn">How to play</button>
+          <button id="settingsBtn" class="btn">Settings</button>
+        </div>
+        <div id="statsLine" class="stats-line"></div>
+      </div>
+    </section>
+
+    <!-- How to play -->
+    <section id="howto" class="screen hidden">
+      <div class="card">
+        <h2>How to play</h2>
+        <div class="steps">
+          <div class="step"><div class="ico ico-paint"></div><div><b>Paint</b>Leave your land to draw a flower trail. Come back home to claim everything inside the loop.</div></div>
+          <div class="step"><div class="ico ico-bonk"></div><div><b>Careful!</b>If anyone touches your trail, you get bonked and your egg loses a heart.</div></div>
+          <div class="step"><div class="ico ico-egg"></div><div><b>Steal</b>Touch enemy eggs to pop their hearts. With 0 hearts, grab the egg and carry it to your nest. Bump a thief to send an egg home.</div></div>
+          <div class="step"><div class="ico ico-cloud"></div><div><b>Survive</b>After 1:00 the clouds eat the island's edge. Grab the star for power-ups. Captured? You're a ghost: touch another nest to break free!</div></div>
+        </div>
+        <p class="controls-hint">Swipe or use arrow keys / WASD to steer.</p>
+        <p class="controls-hint">Win by being the last nest standing, or own the most land when time runs out.</p>
+        <button class="btn primary back">Got it!</button>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="settings" class="screen hidden">
+      <div class="card">
+        <h2>Settings</h2>
+        <div class="settings">
+          <label class="toggle"><span>Music</span><input type="checkbox" data-s="music" /><i></i></label>
+          <label class="toggle"><span>Sound effects</span><input type="checkbox" data-s="sfx" /><i></i></label>
+          <label class="toggle"><span>Vibration</span><input type="checkbox" data-s="vibrate" /><i></i></label>
+          <label class="toggle"><span>Arrow buttons</span><input type="checkbox" data-s="dpad" /><i></i></label>
+          <label class="toggle"><span>Fancy graphics</span><input type="checkbox" data-s="quality" /><i></i></label>
+          <label class="toggle"><span>Hard mode <small>(own trail bonks you)</small></span><input type="checkbox" data-s="hardMode" /><i></i></label>
+          <label class="toggle"><span>Chaos start <small>(own a whole quarter)</small></span><input type="checkbox" data-s="startMode" /><i></i></label>
+        </div>
+        <div class="row">
+          <button id="resetStats" class="btn small">Reset stats</button>
+          <button class="btn primary back">Done</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pause -->
+    <section id="pause" class="screen hidden">
+      <div class="card">
+        <h2>Paused</h2>
+        <button id="resumeBtn" class="btn big primary">Resume</button>
+        <div class="row">
+          <button id="restartBtn" class="btn">Restart</button>
+          <button id="quitBtn" class="btn">Menu</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section id="results" class="screen hidden">
+      <div class="card">
+        <h2 id="resultTitle">You win!</h2>
+        <p id="resultReason" class="tagline"></p>
+        <div id="ranking" class="ranking"></div>
+        <div id="myStats" class="my-stats"></div>
+        <div class="row">
+          <button id="againBtn" class="btn primary">Play again</button>
+          <button id="menuBtn" class="btn">Menu</button>
+        </div>
+      </div>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

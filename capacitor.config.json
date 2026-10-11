@@ -1,0 +1,6 @@
+{
+  "appId": "com.noreatrix.nestnappers",
+  "appName": "Nestnappers",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#ffd9c7" }
+}
