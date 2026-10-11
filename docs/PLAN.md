@@ -264,6 +264,12 @@ Before committing to a name, check the Play Store and App Store, web domains and
 
 ---
 
-## 13. Next Step
+## 13. Status
 
-Start **M0 + M1**: set up the project and render the cute island with 4 coloured quadrants and Cores in their corners, deployed to a live link.
+**Phase 1 (M0–M7) is done** and ships as an Android APK built by GitHub Actions (`.github/workflows/android.yml`).
+
+These Phase 2 items are already in: **ghosts (Shades)** with break-free, the **centre star** (speed, shield, freeze), and the **Hard mode** and **chaos start** settings.
+
+Still to do:
+- **Phase 2:** alliances, diagonal tunnels, emotes, Core compactness, Duos, themed islands.
+- **Phase 3:** online multiplayer, accounts, a cosmetics shop, a Play Store release with a proper signing key, AdMob.
