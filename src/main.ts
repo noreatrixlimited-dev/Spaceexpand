@@ -4,6 +4,9 @@ import '@fontsource/fredoka/600.css';
 import '@fontsource/fredoka/700.css';
 import './style.css';
 
+import { App } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
+
 import { Bots } from './ai/Bot';
 import { Sound } from './audio/Sound';
 import { CONFIG, PLAYER_COLORS, type MatchOptions } from './config';
@@ -430,11 +433,21 @@ document.addEventListener('visibilitychange', () => {
     sound.suspend();
   } else sound.resume();
 });
-// Android hardware back button (Capacitor fires 'backbutton' on document when no plugin handles it)
-document.addEventListener('backbutton', () => {
-  if (phase === 'playing' || phase === 'countdown') pause();
-  else if (phase === 'paused') resume();
-});
+// Android hardware back button: pause in a match, step back through menus, exit from the title.
+if (Capacitor.isNativePlatform()) {
+  void App.addListener('backButton', () => {
+    if (phase === 'playing' || phase === 'countdown') pause();
+    else if (phase === 'paused') resume();
+    else if (phase === 'over') startAttract();
+    else if (!$('title').classList.contains('hidden')) void App.exitApp();
+    else showScreen('title');
+  });
+  void App.addListener('pause', () => {
+    pause();
+    sound.suspend();
+  });
+  void App.addListener('resume', () => sound.resume());
+}
 
 // ---------- main loop ----------
 
@@ -454,6 +467,11 @@ function loop(now: number): void {
       } else {
         hud.countdown('Go!');
         sound.countdown(true);
+        if (store.stats.games < 3) {
+          const touch = 'ontouchstart' in window;
+          window.setTimeout(() => hud.toast(touch ? 'Swipe to move your blob!' : 'Use the arrow keys to move!'), 900);
+          window.setTimeout(() => hud.toast('Loop out and back home to grab land'), 3600);
+        }
         window.setTimeout(() => hud.countdown(''), 800);
       }
     }
