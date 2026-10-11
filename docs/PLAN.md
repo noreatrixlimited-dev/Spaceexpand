@@ -1,4 +1,4 @@
-# Space Expand: Project Plan
+# Project Plan (working title: Nestnappers)
 
 > Cute 3D territory game for 4 players. Protect your Core, paint new land, steal other Cores.
 > Browser first (HTML5 + Three.js), then mobile.
@@ -35,9 +35,11 @@ Based on the original sketch:
 - The board is a **40 × 40 grid**, and each quadrant is **20 × 20**.
 - Each Core sits in the outer corner of its quadrant, matching the sketch.
 - Neighbours: P1–P2, P1–P4, P3–P2, P3–P4. Diagonals: **P1↔P3, P2↔P4**.
-- **Starting land** is set in config and will be decided by playtesting:
-  - `quadrant` (default): each player starts owning their whole quadrant, so conflict starts right away.
-  - `patch`: each player starts with a 6 × 6 patch around their Core, and the rest is neutral.
+- **Starting land (decided): a 6 × 6 home patch** around each Core. The rest of the board is **neutral** and anyone can paint it.
+  - The match flows in three acts: a calm **land rush** (0:00–~0:45), **border fights** once the territories meet, and a **centre showdown** when the Void closes in.
+  - Players naturally grow into their own corner first, so by the middle of the match the board looks like the 4 quadrants of the original sketch.
+  - Why not start with the whole quadrant: every move would be a steal from second one, which is harsh for new players. There would also be no visible "small to big" growth, and that growth is the main reward in territory games.
+  - `startMode: 'quadrant'` stays available as a config option for an "instant chaos" mode.
 
 ---
 
@@ -55,7 +57,7 @@ Based on the original sketch:
   - All trail cells become theirs.
   - Every cell **enclosed** by their land plus the trail also becomes theirs, including enemy land.
   - Enclosed means: run a flood fill from the board edges through cells that are neither their land nor their trail. Any cell the fill doesn't reach is enclosed.
-- Crossing your own trail is safe and does nothing.
+- **Decided:** crossing your own trail is safe and does nothing. It's friendlier, especially with swipe controls. An optional **Hard mode** later makes it a bonk, like Paper.io.
 
 ### 3.3 Bonks (getting caught)
 - If an enemy moves onto your trail:
@@ -93,7 +95,7 @@ A simple state machine, with values tuned per difficulty level (Easy / Normal / 
 
 | State | Behaviour | Switches when… |
 |---|---|---|
-| **Expand** | Draws a short rectangular loop (4–10 cells) out from home, preferring enemy land next to its own | Loop closes → Expand again; an enemy comes near → Flee |
+| **Expand** | Draws a short rectangular loop (4–10 cells) out from home, preferring neutral land early and enemy land once borders meet | Loop closes → Expand again; an enemy comes near → Flee |
 | **Flee** | Takes the shortest path back to its own land | Gets home → Expand or Defend |
 | **Attack** | Heads for an enemy's trail or an enemy Core with 0–1 hearts | Target gone → Expand; its own Core is threatened → Defend |
 | **Defend** | Goes back to its own Core and blocks attackers | Threat gone → Expand |
@@ -236,15 +238,32 @@ Colyseus rooms (quick match + private rooms with a code) → accounts and saves 
 
 ## 11. Open Questions (decide by playtesting)
 
-1. Should players start with the whole **quadrant** or a small **patch**?
+1. ~~Starting land~~ → **decided: 6 × 6 patch** (§2)
 2. Is 3 hearts plus 30-second regen too forgiving or too punishing?
-3. Should crossing your **own** trail be safe (current plan) or a bonk (like Paper.io)?
+3. ~~Own trail~~ → **decided: safe**; Hard mode later (§3.2)
 4. Can a Core be stolen while its owner is standing next to it?
 5. When to start the Void (1:00?) and how fast it should shrink.
 6. Keyboard controls: keep moving after release (Snake-style), or stop on release?
 
 ---
 
-## 12. Next Step
+## 12. Game Name
+
+The name isn't final. **Nestnappers** is the working title.
+
+| Name | Why it works |
+|---|---|
+| **Nestnappers** ⭐ | Says the core action (stealing from nests), sounds cute and playful, and is unusual enough to search for |
+| Yolk Folk | Very cute and memorable; fits the egg Cores |
+| Eggnap! | Short and punchy; works well as an app icon title |
+| Blob Turf | Clear about blobs grabbing land |
+| Paint Pals | Friendly, aimed at kids and families |
+| Hatch & Grab | Describes both protecting and stealing |
+
+Before committing to a name, check the Play Store and App Store, web domains and trademarks.
+
+---
+
+## 13. Next Step
 
 Start **M0 + M1**: set up the project and render the cute island with 4 coloured quadrants and Cores in their corners, deployed to a live link.
