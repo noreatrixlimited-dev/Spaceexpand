@@ -10,8 +10,11 @@ export class Grid {
   readonly trail: Int8Array; // -1 none, else player id
   readonly voided: Uint8Array;
 
-  constructor(size: number) {
+  readonly cornerRadius: number;
+
+  constructor(size: number, cornerRadius = 0) {
     this.size = size;
+    this.cornerRadius = cornerRadius;
     const n = size * size;
     this.owner = new Int8Array(n).fill(-1);
     this.trail = new Int8Array(n).fill(-1);
@@ -33,9 +36,19 @@ export class Grid {
   walkable(x: number, y: number): boolean {
     return this.inside(x, y) && !this.voided[this.idx(x, y)];
   }
-  /** Distance of a cell from the nearest board edge (0 = outer ring). */
+  /**
+   * Which ring a cell belongs to, counting inward from the edge of the rounded-square
+   * island (0 = outermost). Cells cut off by the rounded corners return -1.
+   */
   ring(x: number, y: number): number {
-    return Math.min(x, y, this.size - 1 - x, this.size - 1 - y);
+    const h = this.size / 2;
+    const r = this.cornerRadius;
+    const qx = Math.abs(x + 0.5 - h) - (h - r);
+    const qy = Math.abs(y + 0.5 - h) - (h - r);
+    const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
+    const inside = Math.min(Math.max(qx, qy), 0);
+    const inset = r - outside - inside;
+    return inset < 0 ? -1 : Math.floor(inset);
   }
   countOwned(out: number[]): void {
     out.fill(0);

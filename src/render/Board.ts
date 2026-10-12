@@ -200,6 +200,15 @@ export class Board {
 
     for (let i = 0; i < n; i++) {
       const o = g.voided[i] ? -1 : g.owner[i];
+      if (this.shownOwner[i] === -2 && g.voided[i]) {
+        // Cut away from the start (rounded corners): just hide it.
+        this.shownOwner[i] = -1;
+        this.shownVoid[i] = 1;
+        this.fallY[i] = -20;
+        this.writeTile(i);
+        this.tiles.instanceMatrix.needsUpdate = true;
+        continue;
+      }
       if (g.voided[i] !== this.shownVoid[i] && this.time >= this.pendingAt[i]) {
         this.shownVoid[i] = 1;
         this.vel[i] = 2.5;

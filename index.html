@@ -25,6 +25,8 @@
         <button data-dir="1" class="right" aria-label="Right"></button>
         <button data-dir="2" class="down" aria-label="Down"></button>
       </div>
+      <div id="joy" class="hidden"><div class="knob"></div></div>
+      <button id="throwBtn" aria-label="Throw a ball"><span class="ballicon"></span><b id="ammo">0</b><small id="ammoCap">/3</small></button>
       <div id="countdown"></div>
     </div>
 
@@ -55,12 +57,13 @@
       <div class="card">
         <h2>How to play</h2>
         <div class="steps">
-          <div class="step"><div class="ico ico-paint"></div><div><b>Paint</b>Leave your land to draw a flower trail. Come back home to claim everything inside the loop.</div></div>
+          <div class="step"><div class="ico ico-paint"></div><div><b>Paint</b>Drag anywhere to steer. Leave your land to draw a flower trail, then come back home to claim everything inside the loop.</div></div>
+          <div class="step"><div class="ico ico-ball"></div><div><b>Throw</b>Tap (or the ball button) to throw. Splats paint land, cut enemy trails and stun players. More land = more balls!</div></div>
           <div class="step"><div class="ico ico-bonk"></div><div><b>Careful!</b>If anyone touches your trail, you get bonked and your egg loses a heart.</div></div>
           <div class="step"><div class="ico ico-egg"></div><div><b>Steal</b>Touch enemy eggs to pop their hearts. With 0 hearts, grab the egg and carry it to your nest. Bump a thief to send an egg home.</div></div>
           <div class="step"><div class="ico ico-cloud"></div><div><b>Survive</b>After 1:00 the clouds eat the island's edge. Grab the star for power-ups. Captured? You're a ghost: touch another nest to break free!</div></div>
         </div>
-        <p class="controls-hint">Swipe or use arrow keys / WASD to steer.</p>
+        <p class="controls-hint">Phone: drag to steer, tap to throw. Keyboard: WASD / arrows to steer, Space to throw.</p>
         <p class="controls-hint">Win by being the last nest standing, or own the most land when time runs out.</p>
         <button class="btn primary back">Got it!</button>
       </div>

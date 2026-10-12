@@ -13,14 +13,19 @@ Every push builds an APK on GitHub Actions and publishes it as a **GitHub releas
 The APK is signed with a debug key, which is fine for sideloading. A Play Store release needs your own signing key (see the plan).
 
 ## How to play
+- **Steer:** drag anywhere on the screen (a joystick appears under your finger). Your character glides freely in any direction. On a keyboard, use WASD/arrows (8 directions).
 - **Paint:** leave your land to draw a trail, then return home to claim the trail and everything it encloses.
+- **Throw:** tap the screen, press the ball button, or press Space. The ball auto-aims at an enemy, trail or nest near where you're facing.
+  - A splash paints a patch of land in your colour.
+  - It cuts any enemy trail it lands on (that player gets bonked).
+  - It stuns and knocks back players it hits, and they drop any egg they're carrying.
+  - It pops a heart off an enemy nest.
+- **More land = more balls:** your pouch grows from 3 to 12 balls and refills faster the more land you own. The smallest player refills faster, and rainbow ball piles appear on unclaimed land.
 - **Careful:** anyone touching your trail bonks you, and your egg loses a heart.
 - **Steal:** touch enemy eggs to pop their hearts. At 0 hearts, grab the egg and carry it to your own nest. Bump a thief to send an egg back.
-- **Survive:** after 1:00 the clouds eat the island's edge. Grab the centre star for a speed boost, a bubble shield or a freeze on the clouds.
+- **Survive:** after 1:00 the clouds eat the rounded island from its edge inward. Grab the centre star for a speed boost, a bubble shield or a freeze on the clouds.
 - **Captured?** You become a ghost. Touch another player's nest to break free.
 - **Win:** be the last nest standing, or own the most land when the 3-minute timer ends.
-
-Controls: swipe (phone), arrow keys/WASD or mouse drag (desktop), or on-screen arrow buttons (turn on in Settings).
 
 ## Develop
 ```bash

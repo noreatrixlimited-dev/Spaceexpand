@@ -118,6 +118,17 @@ export class Sound {
     this.tone(784, 0.12, { type: 'triangle', vol: 0.18 });
     this.tone(1046, 0.18, { type: 'triangle', vol: 0.18, delay: 0.09 });
   }
+  whoosh(): void {
+    this.noise(0.18, 0.12, 2400);
+    this.tone(420, 0.16, { type: 'sine', vol: 0.12, slide: 1.8 });
+  }
+  splat(mine: boolean): void {
+    this.noise(0.22, mine ? 0.22 : 0.12, 1100);
+    this.tone(180, 0.22, { type: 'sine', vol: mine ? 0.3 : 0.15, slide: 0.5 });
+  }
+  empty(): void {
+    this.tone(200, 0.08, { type: 'square', vol: 0.06 });
+  }
   steal(): void {
     for (let i = 0; i < 4; i++) this.tone(midi(84 - i * 3), 0.12, { type: 'square', vol: 0.08, delay: i * 0.07 });
   }

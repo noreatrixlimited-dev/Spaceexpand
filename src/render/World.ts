@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PLAYER_COLORS } from '../config';
 import type { Game, GameEvent } from '../core/Game';
-import { DX, DY } from '../core/Grid';
+import { BallsView } from './BallsView';
 import { Blob } from './Blob';
 import { Board, cellToWorld } from './Board';
 import { Critter } from './Critter';
@@ -29,6 +29,7 @@ export class World {
   private game: Game | null = null;
   private board: Board | null = null;
   private blobs: Avatar[] = [];
+  private balls: BallsView | null = null;
   private art: Art | null = null;
   private scenery: Scenery | null = null;
   private post: Post | null = null;
@@ -171,6 +172,8 @@ export class World {
       this.eggs.push(egg);
       this.matchGroup.add(egg.nest, egg.egg);
     }
+    this.balls = new BallsView(size);
+    this.matchGroup.add(this.balls.group);
     this.starScale = 0;
     this.board.update(game, 0);
   }
@@ -247,6 +250,24 @@ export class World {
         case 'starSpawn':
           this.particles.burst(this.worldOf(game.star.x, game.star.y, v).setY(0.8), '#ffe066', 16, 3);
           break;
+        case 'throw':
+          this.blobs[e.pid].kick(0.2);
+          break;
+        case 'splat': {
+          const at = new THREE.Vector3(e.x - game.grid.size / 2, 0.35, e.y - game.grid.size / 2);
+          this.board.captureWave(e.cells, e.x, e.y);
+          this.particles.burst(at, PLAYER_COLORS[e.pid], 14 + Math.min(16, e.cells.length), 4.2, 0.1);
+          this.particles.puff(at, 5);
+          if (e.hit) this.addShake(0.15);
+          break;
+        }
+        case 'stun':
+          this.particles.burst(this.blobPos[e.pid].clone().setY(1.1), '#ffd43b', 10, 3);
+          if (e.pid === humanId) this.addShake(0.4);
+          break;
+        case 'pickup':
+          this.particles.confetti(this.blobPos[e.pid].clone().setY(0.8), 18);
+          break;
         case 'gameOver':
           if (e.winner >= 0) this.particles.confetti(this.blobPos[e.winner].clone().setY(1), 120);
           break;
@@ -274,22 +295,18 @@ export class World {
 
       for (const p of game.players) {
         const b = this.blobs[p.id];
-        let fx = p.x;
-        let fy = p.y;
-        if (p.dir !== null && p.status !== 'bonked') {
-          fx += DX[p.dir] * p.progress;
-          fy += DY[p.dir] * p.progress;
-        }
-        const target = this.worldOf(fx, fy, tmp);
+        const target = tmp.set(p.px - size / 2, 0, p.py - size / 2);
         const cell = game.grid.idx(p.x, p.y);
         target.y = Math.max(-0.2, this.board.liftAt(cell));
         const cur = this.blobPos[p.id];
         if (cur.distanceTo(target) > 3) cur.copy(target);
-        else cur.lerp(target, 1 - Math.exp(-dt * 22));
+        else cur.lerp(target, 1 - Math.exp(-dt * 25));
         b.root.position.copy(cur);
-        if (p.dir !== null) b.setFacing(DX[p.dir], DY[p.dir]);
-        b.moving = p.dir !== null && p.status !== 'bonked';
-        b.mood = p.status === 'shade' ? 'ghost' : p.status === 'bonked' ? 'bonked' : game.over && game.winner === p.id ? 'happy' : 'normal';
+        b.setFacing(Math.cos(p.heading), Math.sin(p.heading));
+        const stunned = p.stunTimer > 0;
+        b.moving = p.moving && p.status !== 'bonked' && !stunned;
+        b.mood =
+          p.status === 'shade' ? 'ghost' : p.status === 'bonked' || stunned ? 'bonked' : game.over && game.winner === p.id ? 'happy' : 'normal';
         b.ghostColor = p.shadeOf >= 0 ? PLAYER_COLORS[p.shadeOf] : null;
         b.carrying = p.carrying >= 0;
         b.crowned = leader === p.id && p.status !== 'shade';
@@ -313,6 +330,8 @@ export class World {
         }
         egg.update(dt, this.time, c.hearts);
       }
+
+      this.balls?.update(game, this.blobPos, this.time);
 
       // star power-up
       const want = game.star.active ? 1 : 0;

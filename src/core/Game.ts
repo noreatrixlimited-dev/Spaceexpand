@@ -1,6 +1,6 @@
 import { CONFIG, PLAYER_NAMES, type MatchOptions } from '../config';
 import { computeCapture } from './capture';
-import { DX, DY, Grid, opposite, type Dir } from './Grid';
+import { Grid, type Dir } from './Grid';
 import { Rng } from './rng';
 
 export type PlayerStatus = 'alive' | 'bonked' | 'shade';
@@ -10,11 +10,16 @@ export interface Player {
   id: number;
   name: string;
   isHuman: boolean;
+  /** Continuous position in cell units (cell (x, y) spans x..x+1, y..y+1). */
+  px: number;
+  py: number;
+  /** Current cell (floor of px/py), updated when a new cell is entered. */
   x: number;
   y: number;
-  dir: Dir | null; // direction currently moving (null = standing still)
-  nextDir: Dir | null; // queued input
-  progress: number; // 0..1 toward the next cell
+  heading: number; // radians: 0 = +x (right), PI/2 = +y (down)
+  aim: number | null; // direction the player wants to face
+  moving: boolean;
+  stunTimer: number;
   status: PlayerStatus;
   bonkTimer: number;
   trail: number[];
@@ -23,15 +28,18 @@ export interface Player {
   power: PowerType | null;
   powerTimer: number;
   shield: boolean;
+  balls: number;
+  ballTimer: number;
+  throwCooldown: number;
   plan: number[]; // used by bots
-  stats: { captures: number; bonks: number; bonked: number; peakLand: number; eggsStolen: number };
+  stats: { captures: number; bonks: number; bonked: number; peakLand: number; eggsStolen: number; throws: number; hits: number };
 }
 
 export type CoreStateKind = 'nest' | 'carried' | 'captured';
 
 export interface Core {
   owner: number;
-  homeX: number; // original corner position
+  homeX: number; // original position
   homeY: number;
   x: number;
   y: number;
@@ -50,6 +58,23 @@ export interface Star {
   timer: number;
 }
 
+export interface Projectile {
+  id: number;
+  owner: number;
+  sx: number;
+  sy: number;
+  tx: number;
+  ty: number;
+  t: number;
+  dur: number;
+}
+
+export interface Pickup {
+  id: number;
+  x: number;
+  y: number;
+}
+
 export type GameEvent =
   | { type: 'trail'; pid: number; cell: number }
   | { type: 'capture'; pid: number; cells: number[]; fromX: number; fromY: number }
@@ -66,7 +91,20 @@ export type GameEvent =
   | { type: 'coreSlide'; owner: number }
   | { type: 'starSpawn' }
   | { type: 'power'; pid: number; power: PowerType }
+  | { type: 'throw'; pid: number; proj: Projectile }
+  | { type: 'splat'; pid: number; x: number; y: number; cells: number[]; hit: boolean }
+  | { type: 'stun'; pid: number; by: number }
+  | { type: 'pickup'; pid: number; x: number; y: number }
+  | { type: 'pickupSpawn'; x: number; y: number }
   | { type: 'gameOver'; winner: number; reason: 'last' | 'time' };
+
+const DIR_ANGLE = [-Math.PI / 2, 0, Math.PI / 2, Math.PI];
+
+export function wrapAngle(a: number): number {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
 
 export class Game {
   readonly opts: MatchOptions;
@@ -76,21 +114,29 @@ export class Game {
   readonly star: Star;
   readonly rng: Rng;
   readonly land = [0, 0, 0, 0];
+  readonly projectiles: Projectile[] = [];
+  readonly pickups: Pickup[] = [];
   events: GameEvent[] = [];
   time = 0;
   voidRing = 0;
   voidTimer: number = CONFIG.voidStart;
   voidFrozen = 0;
+  pickupTimer: number = CONFIG.pickupInterval;
   over = false;
   winner = -1;
-  /** Called whenever a player reaches a cell centre (bots steer here). */
+  private nextId = 1;
+  /** Called whenever a bot enters a new cell or is idle (bots steer here). */
   onArrive: ((p: Player) => void) | null = null;
 
   constructor(opts: MatchOptions) {
     this.opts = opts;
     this.rng = new Rng(opts.seed);
     const size = CONFIG.gridSize;
-    this.grid = new Grid(size);
+    this.grid = new Grid(size, CONFIG.cornerRadius);
+    const g = this.grid;
+    // Rounded corners: cells outside the rounded square are gone from the start.
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (g.ring(x, y) < 0) g.voided[g.idx(x, y)] = 1;
+
     const c = CONFIG.coreInset;
     const far = size - 1 - c;
     const corners = [
@@ -101,28 +147,19 @@ export class Game {
     ];
     for (let id = 0; id < 4; id++) {
       const [x, y] = corners[id];
-      this.cores.push({
-        owner: id,
-        homeX: x,
-        homeY: y,
-        x,
-        y,
-        hearts: CONFIG.coreHearts,
-        invuln: 0,
-        state: 'nest',
-        carrier: -1,
-        regenTimer: 0,
-        threatened: false,
-      });
+      this.cores.push({ owner: id, homeX: x, homeY: y, x, y, hearts: CONFIG.coreHearts, invuln: 0, state: 'nest', carrier: -1, regenTimer: 0, threatened: false });
       this.players.push({
         id,
         name: PLAYER_NAMES[id],
         isHuman: opts.humanSlot === id,
+        px: x + 0.5,
+        py: y + 0.5,
         x,
         y,
-        dir: null,
-        nextDir: null,
-        progress: 0,
+        heading: Math.atan2(size / 2 - y, size / 2 - x),
+        aim: null,
+        moving: false,
+        stunTimer: 0,
         status: 'alive',
         bonkTimer: 0,
         trail: [],
@@ -131,8 +168,11 @@ export class Game {
         power: null,
         powerTimer: 0,
         shield: false,
+        balls: CONFIG.ballStart,
+        ballTimer: 0,
+        throwCooldown: 0,
         plan: [],
-        stats: { captures: 0, bonks: 0, bonked: 0, peakLand: 0, eggsStolen: 0 },
+        stats: { captures: 0, bonks: 0, bonked: 0, peakLand: 0, eggsStolen: 0, throws: 0, hits: 0 },
       });
       this.claimStart(id);
     }
@@ -152,34 +192,27 @@ export class Game {
       [x0, x1] = left ? [0, half - 1] : [half, g.size - 1];
       [y0, y1] = top ? [0, half - 1] : [half, g.size - 1];
     } else {
-      const s = CONFIG.patchSize;
-      [x0, x1] = left ? [0, s - 1] : [g.size - s, g.size - 1];
-      [y0, y1] = top ? [0, s - 1] : [g.size - s, g.size - 1];
+      // A patch centred on the nest.
+      const r = Math.floor(CONFIG.patchSize / 2);
+      [x0, x1] = [core.x - r + (left ? 0 : 1), core.x + r - (left ? 1 : 0)];
+      [y0, y1] = [core.y - r + (top ? 0 : 1), core.y + r - (top ? 1 : 0)];
     }
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) g.owner[g.idx(x, y)] = id;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (g.walkable(x, y)) g.owner[g.idx(x, y)] = id;
   }
 
   // ---------- input ----------
 
-  /** Request a direction. Turns right after leaving a cell snap back so controls feel instant. */
-  setDir(pid: number, d: Dir): void {
+  /** Steer toward an angle (radians, 0 = right, PI/2 = down). Starts the player moving. */
+  setAim(pid: number, angle: number): void {
     const p = this.players[pid];
     if (p.status === 'bonked') return;
-    if (p.dir === null) {
-      p.nextDir = d;
-      return;
-    }
-    if (d === p.dir) {
-      p.nextDir = d;
-      return;
-    }
-    if (p.progress < 0.35 && this.grid.walkable(p.x + DX[d], p.y + DY[d])) {
-      p.dir = d;
-      p.progress = 0;
-      p.nextDir = d;
-      return;
-    }
-    p.nextDir = d;
+    p.aim = angle;
+    p.moving = true;
+  }
+
+  /** 4-way input (keyboard / arrow buttons). */
+  setDir(pid: number, d: Dir): void {
+    this.setAim(pid, DIR_ANGLE[d]);
   }
 
   // ---------- simulation ----------
@@ -189,9 +222,12 @@ export class Game {
     this.time += dt;
 
     for (const p of this.players) this.updatePlayer(p, dt);
+    this.updateBalls(dt);
+    this.updateProjectiles(dt);
     this.updateCores(dt);
     this.updateVoid(dt);
     this.updateStar(dt);
+    this.updatePickups(dt);
 
     this.grid.countOwned(this.land);
     for (const p of this.players) {
@@ -216,35 +252,70 @@ export class Game {
         p.shield = false;
       }
     }
+    if (p.throwCooldown > 0) p.throwCooldown -= dt;
     if (p.status === 'bonked') {
       p.bonkTimer -= dt;
       if (p.bonkTimer <= 0) this.respawn(p);
       return;
     }
-    if (p.dir === null) {
-      if (this.onArrive && !p.isHuman) this.onArrive(p);
-      if (p.nextDir !== null && this.grid.walkable(p.x + DX[p.nextDir], p.y + DY[p.nextDir])) {
-        p.dir = p.nextDir;
-        p.progress = 0;
-      } else return;
+    if (p.stunTimer > 0) {
+      p.stunTimer -= dt;
+      return;
     }
-    p.progress += this.speedOf(p) * dt;
-    let guard = 0;
-    while (p.progress >= 1 && p.dir !== null && guard++ < 4) {
-      p.progress -= 1;
-      p.x += DX[p.dir];
-      p.y += DY[p.dir];
-      this.enterCell(p);
-      if ((p.status as PlayerStatus) === 'bonked') return;
-      if (this.onArrive && !p.isHuman) this.onArrive(p);
-      if (p.nextDir !== null && this.grid.walkable(p.x + DX[p.nextDir], p.y + DY[p.nextDir])) {
-        p.dir = p.nextDir;
-      }
-      if (!this.grid.walkable(p.x + DX[p.dir], p.y + DY[p.dir])) {
-        p.dir = null;
-        p.progress = 0;
-      }
+    if (!p.moving && this.onArrive && !p.isHuman) this.onArrive(p);
+    if (!p.moving) return;
+
+    if (p.aim !== null) {
+      const diff = wrapAngle(p.aim - p.heading);
+      const max = CONFIG.turnRate * dt;
+      p.heading = wrapAngle(p.heading + Math.max(-max, Math.min(max, diff)));
     }
+    let dist = this.speedOf(p) * dt;
+    while (dist > 1e-6) {
+      const step = Math.min(0.25, dist);
+      dist -= step;
+      if (!this.moveBy(p, Math.cos(p.heading) * step, Math.sin(p.heading) * step, true)) break;
+      if (p.status !== 'alive' && p.status !== 'shade') break;
+    }
+  }
+
+  /**
+   * Move a player by (dx, dy) cells, sliding along walls and the void.
+   * Enters every cell crossed (4-connected, so trails never have diagonal gaps).
+   * Returns false if completely blocked.
+   */
+  private moveBy(p: Player, dx: number, dy: number, steering: boolean): boolean {
+    const g = this.grid;
+    let nx = p.px + dx;
+    let ny = p.py + dy;
+    if (!g.walkable(Math.floor(nx), Math.floor(ny))) {
+      if (g.walkable(Math.floor(nx), Math.floor(p.py))) ny = p.py;
+      else if (g.walkable(Math.floor(p.px), Math.floor(ny))) nx = p.px;
+      else return false;
+    }
+    const cx = Math.floor(nx);
+    const cy = Math.floor(ny);
+    const changed = cx !== p.x || cy !== p.y;
+    if (cx !== p.x && cy !== p.y) {
+      // Crossing a corner: step through one of the side cells first.
+      const viaX = g.walkable(cx, p.y);
+      this.enterAt(p, viaX ? cx : p.x, viaX ? p.y : cy);
+      if (p.status === 'bonked') return false;
+    }
+    if (changed) {
+      this.enterAt(p, cx, cy);
+      if (p.status === 'bonked') return false;
+    }
+    p.px = nx;
+    p.py = ny;
+    if (steering && changed && this.onArrive && !p.isHuman) this.onArrive(p);
+    return true;
+  }
+
+  private enterAt(p: Player, x: number, y: number): void {
+    p.x = x;
+    p.y = y;
+    this.enterCell(p);
   }
 
   private enterCell(p: Player): void {
@@ -266,8 +337,11 @@ export class Game {
     const t = g.trail[cell];
     if (t >= 0 && t !== p.id) this.bonk(t, p.id);
     else if (t === p.id && this.opts.hardMode && g.owner[cell] !== p.id) {
-      this.bonk(p.id, p.id);
-      return;
+      // Ignore the cell we just left (free movement can wobble on a boundary).
+      if (p.trail[p.trail.length - 1] !== cell) {
+        this.bonk(p.id, p.id);
+        return;
+      }
     }
 
     // Bumping into an egg carrier knocks the egg back to its nest.
@@ -295,6 +369,14 @@ export class Game {
     }
 
     if (this.star.active && p.x === this.star.x && p.y === this.star.y) this.grantPower(p);
+
+    for (let k = this.pickups.length - 1; k >= 0; k--) {
+      const pk = this.pickups[k];
+      if (pk.x !== p.x || pk.y !== p.y) continue;
+      p.balls = Math.min(this.ballCap(p.id) + CONFIG.pickupBalls, p.balls + CONFIG.pickupBalls);
+      this.pickups.splice(k, 1);
+      this.events.push({ type: 'pickup', pid: p.id, x: pk.x, y: pk.y });
+    }
   }
 
   private near(c: Core, x: number, y: number): boolean {
@@ -312,7 +394,7 @@ export class Game {
   private closeLoop(p: Player): void {
     const g = this.grid;
     const cells = computeCapture(g, p.id, this.protectedCells(p.id));
-    for (const i of p.trail) g.trail[i] = -1;
+    for (const i of p.trail) if (g.trail[i] === p.id) g.trail[i] = -1;
     p.trail = [];
     for (const i of cells) g.owner[i] = p.id;
     this.events.push({ type: 'capture', pid: p.id, cells, fromX: p.x, fromY: p.y });
@@ -323,6 +405,12 @@ export class Game {
     for (const i of old) if (this.grid.trail[i] === p.id) this.grid.trail[i] = -1;
     p.trail = [];
     return old;
+  }
+
+  private isAlly(a: number, b: number): boolean {
+    const pa = this.players[a];
+    const pb = this.players[b];
+    return a === b || pa.shadeOf === b || pb.shadeOf === a;
   }
 
   bonk(victimId: number, byId: number): void {
@@ -339,9 +427,9 @@ export class Game {
     if (v.carrying >= 0) this.dropEgg(v, byId);
     v.status = 'bonked';
     v.bonkTimer = CONFIG.bonkSeconds;
-    v.dir = null;
-    v.nextDir = null;
-    v.progress = 0;
+    v.moving = false;
+    v.aim = null;
+    v.stunTimer = 0;
     v.plan = [];
     v.stats.bonked++;
     if (byId !== victimId) this.players[byId].stats.bonks++;
@@ -353,13 +441,19 @@ export class Game {
   private respawn(p: Player): void {
     const c = this.cores[p.id];
     p.status = 'alive';
-    p.x = c.x;
-    p.y = c.y;
-    p.dir = null;
-    p.nextDir = null;
-    p.progress = 0;
+    this.placeAt(p, c.x, c.y);
     this.grid.owner[this.grid.idx(c.x, c.y)] = p.id;
     this.events.push({ type: 'respawn', pid: p.id });
+  }
+
+  private placeAt(p: Player, x: number, y: number): void {
+    p.x = x;
+    p.y = y;
+    p.px = x + 0.5;
+    p.py = y + 0.5;
+    p.moving = false;
+    p.aim = null;
+    p.stunTimer = 0;
   }
 
   private hitCore(c: Core, p: Player): void {
@@ -405,10 +499,9 @@ export class Game {
     v.power = null;
     v.shield = false;
     v.plan = [];
-    if (v.dir === null && !g.walkable(v.x, v.y)) {
-      v.x = c.x;
-      v.y = c.y;
-    }
+    v.balls = 0;
+    v.stunTimer = 0;
+    if (!g.walkable(v.x, v.y)) this.placeAt(v, c.x, c.y);
     const cells: number[] = [];
     for (let i = 0; i < g.owner.length; i++) {
       if (g.owner[i] === victimId) {
@@ -416,7 +509,6 @@ export class Game {
         cells.push(i);
       }
     }
-    // Ghosts of the victim now serve the new capturer.
     for (const q of this.players) if (q.status === 'shade' && q.shadeOf === victimId) q.shadeOf = p.id;
     p.stats.captures++;
     this.events.push({ type: 'coreCaptured', owner: victimId, by: p.id, cells });
@@ -429,7 +521,6 @@ export class Game {
     c.hearts = 1;
     c.invuln = CONFIG.coreHitInvuln;
     c.regenTimer = 0;
-    // Slide the nest in from the original corner until it lands on solid ground.
     c.x = c.homeX;
     c.y = c.homeY;
     this.slideCoreInward(c);
@@ -444,12 +535,9 @@ export class Game {
     }
     p.status = 'alive';
     p.shadeOf = -1;
-    p.x = c.x;
-    p.y = c.y;
-    p.dir = null;
-    p.nextDir = null;
-    p.progress = 0;
     p.plan = [];
+    p.balls = CONFIG.ballStart;
+    this.placeAt(p, c.x, c.y);
     this.events.push({ type: 'freed', pid: p.id });
   }
 
@@ -466,6 +554,225 @@ export class Game {
     }
     this.events.push({ type: 'power', pid: p.id, power });
   }
+
+  // ---------- balls ----------
+
+  /** Pouch size grows with land. */
+  ballCap(pid: number): number {
+    return Math.min(CONFIG.ballCapMax, CONFIG.ballCapBase + Math.floor(this.land[pid] / CONFIG.ballCapLandPer));
+  }
+
+  private updateBalls(dt: number): void {
+    let smallest = -1;
+    for (const p of this.players) {
+      if (p.status === 'shade') continue;
+      if (smallest < 0 || this.land[p.id] < this.land[smallest]) smallest = p.id;
+    }
+    for (const p of this.players) {
+      if (p.status === 'shade') continue;
+      const cap = this.ballCap(p.id);
+      if (p.balls >= cap) {
+        p.ballTimer = 0;
+        continue;
+      }
+      let rate = CONFIG.ballRateBase + this.land[p.id] * CONFIG.ballRatePerCell;
+      if (p.id === smallest) rate *= CONFIG.ballCatchUp;
+      p.ballTimer += rate * dt;
+      if (p.ballTimer >= 1) {
+        p.ballTimer -= 1;
+        p.balls++;
+      }
+    }
+  }
+
+  /** Best target near the facing direction (enemy, enemy trail or nest), or null. */
+  autoTarget(p: Player, cone: number = CONFIG.autoAimCone): { angle: number; dist: number } | null {
+    const g = this.grid;
+    let best: { angle: number; dist: number } | null = null;
+    let bestScore = Infinity;
+    const consider = (tx: number, ty: number, weight: number) => {
+      const dx = tx - p.px;
+      const dy = ty - p.py;
+      const d = Math.hypot(dx, dy);
+      if (d < 1.5 || d > CONFIG.throwRange + 1) return;
+      const a = Math.atan2(dy, dx);
+      const off = Math.abs(wrapAngle(a - p.heading));
+      if (off > cone) return;
+      const score = off * 4 + d * 0.15 - weight;
+      if (score < bestScore) {
+        bestScore = score;
+        best = { angle: a, dist: d };
+      }
+    };
+    for (const q of this.players) {
+      if (q === p || q.status !== 'alive' || this.isAlly(p.id, q.id)) continue;
+      consider(q.px, q.py, q.carrying >= 0 ? 3 : 2);
+    }
+    for (const c of this.cores) {
+      if (c.state === 'nest' && !this.isAlly(p.id, c.owner) && c.hearts > 0) consider(c.x + 0.5, c.y + 0.5, 1);
+    }
+    // enemy trails within range
+    const r = CONFIG.throwRange;
+    for (let y = Math.max(0, Math.floor(p.py - r)); y <= Math.min(g.size - 1, Math.floor(p.py + r)); y++) {
+      for (let x = Math.max(0, Math.floor(p.px - r)); x <= Math.min(g.size - 1, Math.floor(p.px + r)); x++) {
+        const t = g.trail[g.idx(x, y)];
+        if (t >= 0 && t !== p.id && !this.isAlly(p.id, t)) consider(x + 0.5, y + 0.5, 1.5);
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Throw a ball. Without an angle it auto-aims at a target near the facing direction,
+   * otherwise it lobs straight ahead. Returns true if thrown.
+   */
+  throwBall(pid: number, angle?: number, range?: number): boolean {
+    const p = this.players[pid];
+    if (p.status !== 'alive' || p.stunTimer > 0 || p.balls <= 0 || p.throwCooldown > 0) return false;
+    let a = angle;
+    let r = range;
+    if (a === undefined) {
+      const target = this.autoTarget(p);
+      a = target ? target.angle : p.heading;
+      r = target ? target.dist : undefined;
+    }
+    r = Math.max(2, Math.min(CONFIG.throwRange, r ?? CONFIG.throwRange));
+    const proj: Projectile = {
+      id: this.nextId++,
+      owner: pid,
+      sx: p.px,
+      sy: p.py,
+      tx: p.px + Math.cos(a) * r,
+      ty: p.py + Math.sin(a) * r,
+      t: 0,
+      dur: CONFIG.throwTime * (0.6 + 0.4 * (r / CONFIG.throwRange)),
+    };
+    p.balls--;
+    p.throwCooldown = CONFIG.throwCooldown;
+    p.stats.throws++;
+    this.projectiles.push(proj);
+    this.events.push({ type: 'throw', pid, proj });
+    return true;
+  }
+
+  /** Throw at a specific point (used by bots). */
+  throwAt(pid: number, tx: number, ty: number): boolean {
+    const p = this.players[pid];
+    return this.throwBall(pid, Math.atan2(ty - p.py, tx - p.px), Math.hypot(tx - p.px, ty - p.py));
+  }
+
+  private updateProjectiles(dt: number): void {
+    for (let k = this.projectiles.length - 1; k >= 0; k--) {
+      const pr = this.projectiles[k];
+      pr.t += dt;
+      if (pr.t < pr.dur) continue;
+      this.projectiles.splice(k, 1);
+      this.landBall(pr);
+    }
+  }
+
+  private landBall(pr: Projectile): void {
+    const g = this.grid;
+    const thrower = this.players[pr.owner];
+    const cells: number[] = [];
+    let hit = false;
+    const cx = Math.floor(pr.tx);
+    const cy = Math.floor(pr.ty);
+    if (g.walkable(cx, cy)) {
+      // Nests (and the cells around them) can't be painted over.
+      const guard = new Set<number>();
+      for (const c of this.cores) {
+        if (c.state === 'captured') continue;
+        for (let y = c.y - 1; y <= c.y + 1; y++) for (let x = c.x - 1; x <= c.x + 1; x++) if (g.inside(x, y)) guard.add(g.idx(x, y));
+      }
+      const R = CONFIG.splatRadius;
+      for (let y = Math.floor(pr.ty - R); y <= Math.floor(pr.ty + R); y++) {
+        for (let x = Math.floor(pr.tx - R); x <= Math.floor(pr.tx + R); x++) {
+          if (!g.walkable(x, y) || Math.hypot(x + 0.5 - pr.tx, y + 0.5 - pr.ty) > R) continue;
+          const i = g.idx(x, y);
+          const t = g.trail[i];
+          if (t >= 0 && t !== pr.owner && !this.isAlly(pr.owner, t) && this.players[t].status === 'alive') {
+            this.bonk(t, pr.owner);
+            hit = true;
+          }
+          if (guard.has(i) || g.owner[i] === pr.owner) continue;
+          if (thrower.status === 'shade') continue;
+          g.owner[i] = pr.owner;
+          cells.push(i);
+        }
+      }
+    }
+    // Players caught in the blast: stunned and knocked back (and they drop any egg).
+    for (const q of this.players) {
+      if (q.id === pr.owner || q.status !== 'alive' || this.isAlly(pr.owner, q.id)) continue;
+      const d = Math.hypot(q.px - pr.tx, q.py - pr.ty);
+      if (d > CONFIG.hitRadius) continue;
+      hit = true;
+      if (q.shield) {
+        q.shield = false;
+        q.power = null;
+        q.powerTimer = 0;
+        this.events.push({ type: 'shielded', pid: q.id });
+        continue;
+      }
+      if (q.carrying >= 0) this.dropEgg(q, pr.owner);
+      this.knockback(q, pr.tx, pr.ty);
+      if (q.status !== 'alive') continue;
+      q.stunTimer = CONFIG.stunSeconds;
+      this.events.push({ type: 'stun', pid: q.id, by: pr.owner });
+    }
+    // Nests in the blast lose a heart (never stolen by a ball).
+    for (const c of this.cores) {
+      if (c.state !== 'nest' || this.isAlly(pr.owner, c.owner) || c.invuln > 0 || c.hearts <= 0) continue;
+      if (Math.hypot(c.x + 0.5 - pr.tx, c.y + 0.5 - pr.ty) > CONFIG.splatRadius) continue;
+      c.hearts--;
+      c.invuln = CONFIG.coreHitInvuln;
+      c.regenTimer = 0;
+      hit = true;
+      this.events.push({ type: 'coreHit', owner: c.owner, by: pr.owner, hearts: c.hearts });
+    }
+    if (hit) thrower.stats.hits++;
+    this.events.push({ type: 'splat', pid: pr.owner, x: pr.tx, y: pr.ty, cells, hit });
+  }
+
+  private knockback(q: Player, fx: number, fy: number): void {
+    let dx = q.px - fx;
+    let dy = q.py - fy;
+    const d = Math.hypot(dx, dy);
+    if (d < 0.01) {
+      dx = Math.cos(q.heading + Math.PI);
+      dy = Math.sin(q.heading + Math.PI);
+    } else {
+      dx /= d;
+      dy /= d;
+    }
+    let left = CONFIG.knockback;
+    while (left > 0 && q.status === 'alive') {
+      const s = Math.min(0.25, left);
+      left -= s;
+      if (!this.moveBy(q, dx * s, dy * s, false)) break;
+    }
+  }
+
+  private updatePickups(dt: number): void {
+    this.pickupTimer -= dt;
+    if (this.pickupTimer > 0) return;
+    this.pickupTimer = CONFIG.pickupInterval;
+    if (this.pickups.length >= CONFIG.pickupMax) return;
+    const g = this.grid;
+    for (let tries = 0; tries < 30; tries++) {
+      const x = this.rng.int(2, g.size - 3);
+      const y = this.rng.int(2, g.size - 3);
+      const i = g.idx(x, y);
+      if (!g.walkable(x, y) || g.owner[i] >= 0 || g.ring(x, y) < 2) continue;
+      if (this.pickups.some((p) => p.x === x && p.y === y)) continue;
+      this.pickups.push({ id: this.nextId++, x, y });
+      this.events.push({ type: 'pickupSpawn', x, y });
+      return;
+    }
+  }
+
+  // ---------- nests, void, star ----------
 
   private updateCores(dt: number): void {
     const g = this.grid;
@@ -519,7 +826,7 @@ export class Game {
     const g = this.grid;
     const cells: number[] = [];
     for (let i = 0; i < g.owner.length; i++) {
-      if (g.voided[i] || g.ring(g.x(i), g.y(i)) !== ring) continue;
+      if (g.voided[i] || g.ring(g.x(i), g.y(i)) > ring) continue;
       g.voided[i] = 1;
       g.owner[i] = -1;
       const t = g.trail[i];
@@ -527,6 +834,7 @@ export class Game {
       g.trail[i] = -1;
       cells.push(i);
     }
+    for (let k = this.pickups.length - 1; k >= 0; k--) if (!g.walkable(this.pickups[k].x, this.pickups[k].y)) this.pickups.splice(k, 1);
     this.events.push({ type: 'voidRing', ring, cells });
 
     for (const c of this.cores) {
@@ -536,21 +844,18 @@ export class Game {
         this.events.push({ type: 'coreSlide', owner: c.owner });
       }
     }
+    const mid = (g.size - 1) / 2;
     for (const p of this.players) {
       if (g.walkable(p.x, p.y)) continue;
       if (p.status === 'alive') this.bonk(p.id, p.id);
       if (p.status === 'shade') {
-        p.x += Math.sign((g.size - 1) / 2 - p.x);
-        p.y += Math.sign((g.size - 1) / 2 - p.y);
-        p.dir = null;
-        p.progress = 0;
-      }
-    }
-    // Make sure nobody is left moving into the void.
-    for (const p of this.players) {
-      if (p.dir !== null && !g.walkable(p.x + DX[p.dir], p.y + DY[p.dir])) {
-        p.dir = null;
-        p.progress = 0;
+        let guard = 0;
+        let { x, y } = p;
+        while (!g.walkable(x, y) && guard++ < g.size) {
+          x += Math.sign(mid - x);
+          y += Math.sign(mid - y);
+        }
+        this.placeAt(p, x, y);
       }
     }
   }
@@ -559,7 +864,6 @@ export class Game {
     if (this.star.active) return;
     this.star.timer -= dt;
     if (this.star.timer > 0) return;
-    // Pick a free cell near the centre.
     const g = this.grid;
     const mid = Math.floor(g.size / 2);
     for (let tries = 0; tries < 20; tries++) {
@@ -589,7 +893,7 @@ export class Game {
     }
   }
 
-  /** Player with the most land among those whose Core survives. */
+  /** Player with the most land among those whose nest survives. */
   leader(): number {
     let best = -1;
     for (const c of this.aliveCores()) {
@@ -598,7 +902,7 @@ export class Game {
     return best;
   }
 
-  /** Final standings: surviving Cores first, then by land. */
+  /** Final standings: surviving nests first, then by land. */
   ranking(): number[] {
     return [0, 1, 2, 3].sort((a, b) => {
       const ca = this.cores[a].state === 'captured' ? 0 : 1;
@@ -612,10 +916,5 @@ export class Game {
     this.over = true;
     this.winner = winner;
     this.events.push({ type: 'gameOver', winner, reason });
-  }
-
-  // Exposed for bots and tests.
-  isOpposite(a: Dir, b: Dir): boolean {
-    return opposite(a) === b;
   }
 }

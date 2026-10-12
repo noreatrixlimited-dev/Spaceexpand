@@ -1,6 +1,7 @@
 import type { Difficulty } from '../config';
 import type { Game, Player } from '../core/Game';
 import { DX, DY, opposite, type Dir } from '../core/Grid';
+import { CONFIG } from '../config';
 import { bfs, manhattan } from './path';
 
 interface BotParams {
@@ -12,12 +13,14 @@ interface BotParams {
   loopMin: number;
   loopMax: number;
   starRange: number;
+  throwTrail: number; // chance per step to throw at a visible enemy trail
+  throwPlayer: number; // chance per step to throw at an enemy in range
 }
 
 const PARAMS: Record<Difficulty, BotParams> = {
-  easy: { reaction: 0.5, caution: 0, attackRange: 4, coreAggro: 0.12, coreRange: 9, loopMin: 3, loopMax: 7, starRange: 8 },
-  normal: { reaction: 0.85, caution: 1, attackRange: 7, coreAggro: 0.3, coreRange: 13, loopMin: 3, loopMax: 8, starRange: 12 },
-  hard: { reaction: 1, caution: 2, attackRange: 11, coreAggro: 0.5, coreRange: 18, loopMin: 4, loopMax: 9, starRange: 16 },
+  easy: { reaction: 0.5, caution: 0, attackRange: 4, coreAggro: 0.12, coreRange: 9, loopMin: 3, loopMax: 7, starRange: 8, throwTrail: 0.05, throwPlayer: 0.015 },
+  normal: { reaction: 0.85, caution: 1, attackRange: 7, coreAggro: 0.3, coreRange: 13, loopMin: 3, loopMax: 8, starRange: 12, throwTrail: 0.12, throwPlayer: 0.035 },
+  hard: { reaction: 1, caution: 2, attackRange: 11, coreAggro: 0.5, coreRange: 18, loopMin: 4, loopMax: 9, starRange: 16, throwTrail: 0.25, throwPlayer: 0.07 },
 };
 
 type Mode = 'idle' | 'expand' | 'flee' | 'attack' | 'raid' | 'carry' | 'star' | 'ghost';
@@ -62,6 +65,7 @@ export class Bots {
     }
 
     const onHome = g.owner[here] === p.id;
+    this.maybeThrow(p);
 
     // Danger: run home if an enemy could reach my trail before I'm safe.
     if (!onHome && p.trail.length && this.mode[p.id] !== 'flee') {
@@ -320,8 +324,68 @@ export class Bots {
       p.plan = [];
       return;
     }
-    const d: Dir = dx === 1 ? 1 : dx === -1 ? 3 : dy === 1 ? 2 : 0;
-    p.nextDir = d;
-    if (p.dir !== null && p.dir !== d && p.progress < 0.35) p.dir = d;
+    // Steer at the centre of the next cell; bots turn instantly (rendering smooths it).
+    const a = Math.atan2(g.y(next) + 0.5 - p.py, g.x(next) + 0.5 - p.px);
+    p.aim = a;
+    p.heading = a;
+    p.moving = true;
+  }
+
+  /** Throw balls at enemies, their trails or nests, or to grab land when the pouch is full. */
+  private maybeThrow(p: Player): void {
+    const game = this.game;
+    if (p.status !== 'alive' || p.balls <= 0 || p.throwCooldown > 0) return;
+    const rng = game.rng;
+    const prm = this.params;
+    const R = CONFIG.throwRange;
+    const inRange = (x: number, y: number) => {
+      const d = Math.hypot(x - p.px, y - p.py);
+      return d >= 2 && d <= R;
+    };
+    // 1. Enemy trails: cutting one bonks its owner.
+    const g = game.grid;
+    let bestTrail: [number, number] | null = null;
+    let bestD = Infinity;
+    for (let y = Math.max(0, Math.floor(p.py - R)); y <= Math.min(g.size - 1, Math.floor(p.py + R)); y++) {
+      for (let x = Math.max(0, Math.floor(p.px - R)); x <= Math.min(g.size - 1, Math.floor(p.px + R)); x++) {
+        const t = g.trail[g.idx(x, y)];
+        if (t < 0 || t === p.id || this.isAlly(p, t)) continue;
+        const d = Math.hypot(x + 0.5 - p.px, y + 0.5 - p.py);
+        if (d >= 2 && d <= R && d < bestD) {
+          bestD = d;
+          bestTrail = [x + 0.5, y + 0.5];
+        }
+      }
+    }
+    if (bestTrail && rng.chance(prm.throwTrail)) {
+      game.throwAt(p.id, bestTrail[0], bestTrail[1]);
+      return;
+    }
+    // 2. Enemy players (lead the target a little); egg carriers first.
+    for (const q of game.players) {
+      if (q === p || q.status !== 'alive' || this.isAlly(p, q.id)) continue;
+      const lead = q.moving ? game.speedOf(q) * CONFIG.throwTime * 0.6 : 0;
+      const tx = q.px + Math.cos(q.heading) * lead;
+      const ty = q.py + Math.sin(q.heading) * lead;
+      if (!inRange(tx, ty)) continue;
+      if (rng.chance(q.carrying >= 0 ? prm.throwPlayer * 2 : prm.throwPlayer)) {
+        game.throwAt(p.id, tx, ty);
+        return;
+      }
+    }
+    // 3. Enemy nests with hearts left.
+    for (const c of game.cores) {
+      if (c.owner === p.id || c.state !== 'nest' || c.hearts <= 0 || c.invuln > 0 || this.isAlly(p, c.owner)) continue;
+      if (inRange(c.x + 0.5, c.y + 0.5) && rng.chance(prm.throwPlayer)) {
+        game.throwAt(p.id, c.x + 0.5, c.y + 0.5);
+        return;
+      }
+    }
+    // 4. Pouch full: lob ahead to grab land.
+    if (p.balls >= game.ballCap(p.id) && rng.chance(0.25)) {
+      const tx = p.px + Math.cos(p.heading) * R * 0.8;
+      const ty = p.py + Math.sin(p.heading) * R * 0.8;
+      if (g.walkable(Math.floor(tx), Math.floor(ty)) && g.owner[g.idx(Math.floor(tx), Math.floor(ty))] !== p.id) game.throwAt(p.id, tx, ty);
+    }
   }
 }

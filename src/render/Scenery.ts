@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { CONFIG } from '../config';
 import { Rng } from '../core/rng';
 import { loadGltf } from './assets';
 import { toon } from './materials';
@@ -103,18 +103,36 @@ export class Scenery {
     this.group.add(sky);
   }
 
+  /** A flat slab shaped like the island: a square with rounded corners. */
+  private slab(width: number, radius: number, height: number, top: number, color: string, rough = 0.8): THREE.Mesh {
+    const h = width / 2;
+    const r = Math.min(radius, h);
+    const shape = new THREE.Shape();
+    shape.moveTo(-h + r, -h);
+    shape.lineTo(h - r, -h);
+    shape.quadraticCurveTo(h, -h, h, -h + r);
+    shape.lineTo(h, h - r);
+    shape.quadraticCurveTo(h, h, h - r, h);
+    shape.lineTo(-h + r, h);
+    shape.quadraticCurveTo(-h, h, -h, h - r);
+    shape.lineTo(-h, -h + r);
+    shape.quadraticCurveTo(-h, -h, -h + r, -h);
+    const bevel = Math.min(0.25, height * 0.3);
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: height - bevel * 2, bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 2, curveSegments: 10 });
+    geo.rotateX(Math.PI / 2); // extrude downward from the top face
+    geo.translate(0, top - bevel, 0);
+    const m = new THREE.Mesh(geo, toon(color, { roughness: rough }));
+    m.receiveShadow = true;
+    return m;
+  }
+
   private buildBase(): void {
     const s = this.size + 2.6;
-    const lip = new THREE.Mesh(new RoundedBoxGeometry(s, 0.7, s, 3, 0.25), toon(GRASS));
-    lip.position.y = -0.45;
-    const dirt = new THREE.Mesh(new RoundedBoxGeometry(s - 0.3, 2.6, s - 0.3, 3, 0.35), toon(DIRT, { roughness: 0.85 }));
-    dirt.position.y = -1.9;
-    const dark = new THREE.Mesh(new RoundedBoxGeometry(s - 1.2, 1.8, s - 1.2, 3, 0.5), toon(DIRT_DARK, { roughness: 0.9 }));
-    dark.position.y = -3.6;
-    for (const m of [lip, dirt, dark]) {
-      m.receiveShadow = true;
-      this.base.add(m);
-    }
+    const r = CONFIG.cornerRadius + 1.3;
+    const lip = this.slab(s, r, 0.7, -0.1, GRASS, 0.62);
+    const dirt = this.slab(s - 0.3, r - 0.15, 2.6, -0.6, DIRT, 0.85);
+    const dark = this.slab(s - 1.2, r - 0.6, 1.8, -3.0, DIRT_DARK, 0.9);
+    this.base.add(lip, dirt, dark);
     // Rocky underside with a few hanging chunks.
     const rng = new Rng(11);
     const rockMat = toon(ROCK, { roughness: 0.95, flatShading: true });
@@ -135,14 +153,29 @@ export class Scenery {
   /** Trees, bushes and rocks on the grass border, outside the playable grid. */
   private buildRim(art: Art): void {
     const rng = new Rng(5);
-    const half = this.size / 2;
+    // Walk the rounded-square outline just outside the playable tiles.
+    const R = CONFIG.cornerRadius;
+    const inner = this.size / 2 - R;
     const ring = (t: number): [number, number] => {
-      // walk the perimeter just outside the grid
-      const side = Math.floor(t * 4);
-      const f = (t * 4) % 1;
-      const along = -half - 0.6 + f * (this.size + 1.2);
-      const out = half + 0.55 + rng.next() * 0.45;
-      return side === 0 ? [along, -out] : side === 1 ? [out, along] : side === 2 ? [-along, out] : [-out, -along];
+      const out = R + 0.55 + rng.next() * 0.45;
+      const straight = inner * 2;
+      const arc = (Math.PI / 2) * out;
+      const sideLen = straight + arc;
+      let u = t * sideLen * 4;
+      const side = Math.floor(u / sideLen);
+      u -= side * sideLen;
+      let x: number, z: number;
+      if (u < straight) {
+        x = -inner + u;
+        z = -inner - out;
+      } else {
+        const a = -Math.PI / 2 + ((u - straight) / arc) * (Math.PI / 2);
+        x = inner + Math.cos(a) * out;
+        z = -inner + Math.sin(a) * out;
+      }
+      // rotate the top side onto each of the four sides
+      const rot = (side * Math.PI) / 2;
+      return [x * Math.cos(rot) - z * Math.sin(rot), x * Math.sin(rot) + z * Math.cos(rot)];
     };
     const count = Math.round(this.size * 1.5);
     for (let k = 0; k < count; k++) {

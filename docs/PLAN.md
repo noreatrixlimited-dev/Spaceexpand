@@ -264,6 +264,17 @@ Before committing to a name, check the Play Store and App Store, web domains and
 
 ---
 
+## 12b. Update: free movement and balls
+
+- **Free movement:** players glide in any direction (joystick, or 8-way keys) over the visible tile grid. Land is still owned tile by tile; trails are always unbroken, side-connected chains of tiles.
+- **Island:** a square with softly rounded corners (radius 7 tiles), with nests near the four corners. The clouds shrink it in rounded-square rings.
+- **Balls:**
+  - *Supply:* the pouch holds 3 balls plus 1 per 35 tiles owned, up to 12. Refill speed is 0.18 balls/s plus 0.0012 per tile owned, ×1.6 for the player with the least land. Rainbow ball pickups (+2 balls) appear on unclaimed land.
+  - *Throwing:* tap, the throw button or Space. The ball auto-aims within about 30° of your facing and travels up to 7 tiles.
+  - *Splash (radius 1.6 tiles):* paints land for the thrower. It never paints over nests or the tiles next to them.
+  - *Effects:* it cuts enemy trails (bonk), stuns players it hits (1 s) and knocks them back 1.6 tiles (they drop any egg), and pops one nest heart (never steals the egg).
+  - *Bots:* they throw at trails, players and nests, and lob balls ahead to grab land when their pouch is full.
+
 ## 13. Status
 
 **Phase 1 (M0–M7) is done** and ships as an Android APK built by GitHub Actions (`.github/workflows/android.yml`).

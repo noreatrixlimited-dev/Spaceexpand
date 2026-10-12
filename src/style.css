@@ -794,3 +794,76 @@ h2 {
     margin: 2px 0 6px;
   }
 }
+
+/* joystick + throw button */
+#joy {
+  position: absolute;
+  width: 110px;
+  height: 110px;
+  margin: -55px 0 0 -55px;
+  border-radius: 50%;
+  background: rgba(255, 250, 243, 0.28);
+  border: 3px solid rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+#joy .knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 0 rgba(74, 54, 84, 0.2);
+  transform: translate(-50%, -50%);
+}
+#throwBtn {
+  position: absolute;
+  right: calc(20px + var(--safe-right));
+  bottom: calc(26px + var(--safe-bottom));
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  border: 0;
+  pointer-events: auto;
+  background: radial-gradient(circle at 35% 30%, #fff 0 12%, #ffe3ef 13%, #ff8fb1 70%);
+  box-shadow: 0 6px 0 var(--pink-dark), 0 10px 24px rgba(74, 54, 84, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(180, 60, 100, 0.5);
+  touch-action: none;
+}
+#throwBtn.pressed {
+  transform: translateY(4px);
+  box-shadow: 0 2px 0 var(--pink-dark);
+}
+#throwBtn.empty {
+  filter: grayscale(0.8);
+  opacity: 0.7;
+}
+#throwBtn .ballicon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff 0 18%, #ffd43b 20% 100%);
+  box-shadow: inset -3px -3px 0 rgba(0, 0, 0, 0.12);
+}
+#throwBtn b {
+  font-size: 28px;
+  margin-left: 4px;
+}
+#throwBtn small {
+  font-size: 14px;
+  align-self: flex-end;
+  margin-bottom: 26px;
+}
+#dpad {
+  right: auto;
+  left: calc(18px + var(--safe-left));
+}
+.ico-ball {
+  background: radial-gradient(circle at 40% 38%, #fff 0 8%, #ffd43b 9% 30%, transparent 31%), radial-gradient(circle at 68% 66%, #ff8fb1 0 16%, transparent 17%), #fff3d6;
+}

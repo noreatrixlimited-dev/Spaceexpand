@@ -1,89 +1,132 @@
 import type { Dir } from '../core/Grid';
 
-const KEYS: Record<string, Dir> = {
-  ArrowUp: 0,
-  KeyW: 0,
-  ArrowRight: 1,
-  KeyD: 1,
-  ArrowDown: 2,
-  KeyS: 2,
-  ArrowLeft: 3,
-  KeyA: 3,
+const KEY_VEC: Record<string, [number, number]> = {
+  ArrowUp: [0, -1],
+  KeyW: [0, -1],
+  ArrowRight: [1, 0],
+  KeyD: [1, 0],
+  ArrowDown: [0, 1],
+  KeyS: [0, 1],
+  ArrowLeft: [-1, 0],
+  KeyA: [-1, 0],
 };
 
-/** Keyboard, swipe and on-screen arrow buttons, all mapped to a direction callback. */
+/**
+ * Controls:
+ * - floating joystick: touch/drag anywhere to steer in any direction
+ * - a quick tap (or the throw button / Space) throws a ball
+ * - keyboard: WASD/arrows in 8 directions
+ * - optional on-screen arrow buttons (4 directions)
+ */
 export class Input {
+  onAim: (angle: number) => void = () => {};
   onDir: (d: Dir) => void = () => {};
+  onThrow: () => void = () => {};
   onPause: () => void = () => {};
   enabled = false;
-  private touchStart: { x: number; y: number; id: number } | null = null;
+  private held = new Set<string>();
+  private stick: { id: number; x: number; y: number; t: number; moved: number } | null = null;
 
-  constructor(surface: HTMLElement, dpad: HTMLElement) {
+  constructor(surface: HTMLElement, dpad: HTMLElement, private readonly joy: HTMLElement, throwBtn: HTMLElement) {
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Escape' || e.code === 'KeyP') {
         this.onPause();
         return;
       }
-      const d = KEYS[e.code];
-      if (d === undefined || !this.enabled) return;
-      e.preventDefault();
-      this.onDir(d);
-    });
-
-    // Swipe: fire as soon as the finger moves far enough, then re-anchor so you can chain turns.
-    const threshold = () => Math.max(18, Math.min(window.innerWidth, window.innerHeight) * 0.035);
-    surface.addEventListener(
-      'touchstart',
-      (e) => {
-        const t = e.changedTouches[0];
-        this.touchStart = { x: t.clientX, y: t.clientY, id: t.identifier };
-      },
-      { passive: true },
-    );
-    surface.addEventListener(
-      'touchmove',
-      (e) => {
-        if (!this.touchStart || !this.enabled) return;
-        for (const t of Array.from(e.changedTouches)) {
-          if (t.identifier !== this.touchStart.id) continue;
-          const dx = t.clientX - this.touchStart.x;
-          const dy = t.clientY - this.touchStart.y;
-          if (Math.hypot(dx, dy) < threshold()) continue;
-          this.onDir(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : dy > 0 ? 2 : 0);
-          this.touchStart = { x: t.clientX, y: t.clientY, id: t.identifier };
-        }
+      if (!this.enabled) return;
+      if (e.code === 'Space' || e.code === 'Enter') {
         e.preventDefault();
-      },
-      { passive: false },
-    );
-    surface.addEventListener('touchend', () => (this.touchStart = null), { passive: true });
-
-    // Mouse drag works like swipe on desktop.
-    let mouse: { x: number; y: number } | null = null;
-    surface.addEventListener('mousedown', (e) => (mouse = { x: e.clientX, y: e.clientY }));
-    window.addEventListener('mouseup', () => (mouse = null));
-    surface.addEventListener('mousemove', (e) => {
-      if (!mouse || !this.enabled) return;
-      const dx = e.clientX - mouse.x;
-      const dy = e.clientY - mouse.y;
-      if (Math.hypot(dx, dy) < 24) return;
-      this.onDir(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : dy > 0 ? 2 : 0);
-      mouse = { x: e.clientX, y: e.clientY };
+        if (!e.repeat) this.onThrow();
+        return;
+      }
+      if (KEY_VEC[e.code]) {
+        e.preventDefault();
+        this.held.add(e.code);
+        this.keyAim();
+      }
     });
+    window.addEventListener('keyup', (e) => {
+      if (this.held.delete(e.code)) this.keyAim();
+    });
+    window.addEventListener('blur', () => this.held.clear());
+
+    // Floating joystick on the play surface (pointer events cover touch and mouse).
+    const knob = joy.querySelector('.knob') as HTMLElement;
+    const radius = 46;
+    surface.addEventListener('pointerdown', (e) => {
+      if (!this.enabled || this.stick) return;
+      this.stick = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
+      joy.style.left = `${e.clientX}px`;
+      joy.style.top = `${e.clientY}px`;
+      knob.style.transform = 'translate(-50%, -50%)';
+      joy.classList.remove('hidden');
+      surface.setPointerCapture?.(e.pointerId);
+    });
+    surface.addEventListener('pointermove', (e) => {
+      const s = this.stick;
+      if (!s || e.pointerId !== s.id || !this.enabled) return;
+      const dx = e.clientX - s.x;
+      const dy = e.clientY - s.y;
+      const len = Math.hypot(dx, dy);
+      s.moved = Math.max(s.moved, len);
+      const k = Math.min(1, radius / Math.max(1, len));
+      knob.style.transform = `translate(calc(-50% + ${dx * k}px), calc(-50% + ${dy * k}px))`;
+      if (len > 8) this.onAim(Math.atan2(dy, dx));
+      // Let the base follow a finger that drags far away.
+      if (len > radius * 1.6) {
+        s.x = e.clientX - (dx / len) * radius * 1.6;
+        s.y = e.clientY - (dy / len) * radius * 1.6;
+        joy.style.left = `${s.x}px`;
+        joy.style.top = `${s.y}px`;
+      }
+    });
+    const end = (e: PointerEvent) => {
+      const s = this.stick;
+      if (!s || e.pointerId !== s.id) return;
+      // A quick tap without dragging throws a ball.
+      if (this.enabled && s.moved < 10 && performance.now() - s.t < 250) this.onThrow();
+      this.stick = null;
+      joy.classList.add('hidden');
+    };
+    surface.addEventListener('pointerup', end);
+    surface.addEventListener('pointercancel', end);
+
+    const press = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.enabled) this.onThrow();
+      throwBtn.classList.add('pressed');
+      window.setTimeout(() => throwBtn.classList.remove('pressed'), 120);
+    };
+    throwBtn.addEventListener('pointerdown', press);
 
     dpad.querySelectorAll<HTMLElement>('[data-dir]').forEach((btn) => {
       const d = Number(btn.dataset.dir) as Dir;
-      const press = (e: Event) => {
+      btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        e.stopPropagation();
         if (this.enabled) this.onDir(d);
         btn.classList.add('pressed');
-      };
-      btn.addEventListener('touchstart', press, { passive: false });
-      btn.addEventListener('mousedown', press);
+      });
       const up = () => btn.classList.remove('pressed');
-      btn.addEventListener('touchend', up);
-      btn.addEventListener('mouseup', up);
-      btn.addEventListener('mouseleave', up);
+      btn.addEventListener('pointerup', up);
+      btn.addEventListener('pointerleave', up);
     });
+  }
+
+  private keyAim(): void {
+    let x = 0;
+    let y = 0;
+    for (const k of this.held) {
+      x += KEY_VEC[k][0];
+      y += KEY_VEC[k][1];
+    }
+    if (this.enabled && (x !== 0 || y !== 0)) this.onAim(Math.atan2(y, x));
+  }
+
+  reset(): void {
+    this.stick = null;
+    this.held.clear();
+    this.joy.classList.add('hidden');
   }
 }

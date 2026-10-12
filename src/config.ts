@@ -4,13 +4,15 @@ export const CONFIG = {
   tickRate: 30,
   matchSeconds: 180,
 
+  cornerRadius: 7, // rounded corners of the island, in cells
   baseSpeed: 6, // cells per second
+  turnRate: 11, // radians per second when steering toward the stick direction
   shadeSpeedMul: 1.25,
   carrySpeedMul: 0.7,
   boostSpeedMul: 1.5,
 
   patchSize: 6,
-  coreInset: 2, // core distance from the board corner
+  coreInset: 4, // nest distance from the board corner (inside the rounded corner)
 
   coreHearts: 3,
   coreHitInvuln: 3,
@@ -21,6 +23,26 @@ export const CONFIG = {
   voidStart: 60,
   voidInterval: 12,
   voidMaxRings: 11,
+
+  // Balls: more land = more balls and a bigger pouch.
+  ballStart: 2,
+  ballCapBase: 3,
+  ballCapMax: 12,
+  ballCapLandPer: 35, // +1 pouch slot per this many owned cells
+  ballRateBase: 0.18, // balls per second with no land
+  ballRatePerCell: 0.0012, // extra balls per second per owned cell
+  ballCatchUp: 1.6, // rate multiplier for the player with the least land
+  throwRange: 7,
+  throwTime: 0.75, // flight time in seconds
+  throwCooldown: 0.4,
+  splatRadius: 1.6,
+  hitRadius: 1.3,
+  stunSeconds: 1,
+  knockback: 1.6,
+  autoAimCone: 0.55, // radians either side of facing
+  pickupInterval: 7,
+  pickupMax: 5,
+  pickupBalls: 2,
 
   starFirst: 25,
   starInterval: 25,

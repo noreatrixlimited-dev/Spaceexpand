@@ -25,7 +25,7 @@ const store = new Store();
 const sound = new Sound();
 const world = new World($<HTMLCanvasElement>('scene'), store.settings.quality);
 const hud = new Hud();
-const input = new Input($('scene'), $('dpad'));
+const input = new Input($('scene'), $('dpad'), $('joy'), $('throwBtn'));
 
 let game: Game;
 let phase: Phase = 'menu';
@@ -148,6 +148,7 @@ function startMatch(): void {
   countdownLeft = 3.2;
   lastTick = 4;
   input.enabled = true;
+  input.reset();
   applySettings();
 }
 
@@ -255,6 +256,24 @@ function handleEvents(events: GameEvent[]): void {
         if (e.pid === me) hud.toast(e.power === 'speed' ? 'Zoom zoom!' : e.power === 'shield' ? 'Bubble shield!' : 'Clouds frozen!', true);
         else if (e.power === 'freeze') hud.toast(`${nameOf(e.pid)} froze the clouds`);
         break;
+      case 'throw':
+        if (e.pid === me) sound.whoosh();
+        break;
+      case 'splat':
+        if (e.pid === me || e.hit) sound.splat(e.pid === me);
+        break;
+      case 'stun':
+        if (e.pid === me) {
+          vibrate(80);
+          hud.toast(`Bonked by ${nameOf(e.by)}'s ball!`);
+        } else if (e.by === me) hud.toast(`Hit ${nameOf(e.pid)}!`);
+        break;
+      case 'pickup':
+        if (e.pid === me) {
+          sound.heartGained();
+          hud.toast('+2 balls');
+        }
+        break;
       case 'gameOver':
         onGameOver(e.winner, e.reason);
         break;
@@ -311,6 +330,13 @@ function onGameOver(winner: number, reason: 'last' | 'time'): void {
 
 input.onDir = (d) => {
   if (human !== null && (phase === 'playing' || phase === 'countdown')) game.setDir(human, d);
+};
+input.onAim = (a) => {
+  if (human !== null && (phase === 'playing' || phase === 'countdown')) game.setAim(human, a);
+};
+input.onThrow = () => {
+  if (human === null || phase !== 'playing') return;
+  if (!game.throwBall(human) && game.players[human].balls <= 0) sound.empty();
 };
 input.onPause = () => (phase === 'paused' ? resume() : pause());
 
@@ -489,7 +515,7 @@ function loop(now: number): void {
         sound.countdown(true);
         if (store.stats.games < 3) {
           const touch = 'ontouchstart' in window;
-          window.setTimeout(() => hud.toast(touch ? 'Swipe to move your blob!' : 'Use the arrow keys to move!'), 900);
+          window.setTimeout(() => hud.toast(touch ? 'Drag to steer, tap to throw!' : 'WASD to steer, Space to throw!'), 900);
           window.setTimeout(() => hud.toast('Loop out and back home to grab land'), 3600);
         }
         window.setTimeout(() => hud.countdown(''), 800);

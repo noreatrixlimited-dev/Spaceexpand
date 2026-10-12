@@ -14,6 +14,9 @@ export class Hud {
   private readonly arrow = $('thief-arrow');
   private readonly countdownEl = $('countdown');
   private readonly minimap = $<HTMLCanvasElement>('minimap');
+  private readonly ammo = $('ammo');
+  private readonly ammoCap = $('ammoCap');
+  private readonly throwBtn = $('throwBtn');
   private readonly mm: CanvasRenderingContext2D;
   private rows: HTMLElement[] = [];
   private lastTimerText = '';
@@ -89,6 +92,11 @@ export class Hud {
 
     if (human !== null) {
       const p = game.players[human];
+      const ammo = p.status === 'shade' ? 0 : p.balls;
+      if (this.ammo.textContent !== String(ammo)) this.ammo.textContent = String(ammo);
+      const cap = `/${game.ballCap(human)}`;
+      if (this.ammoCap.textContent !== cap) this.ammoCap.textContent = cap;
+      this.throwBtn.classList.toggle('empty', ammo <= 0);
       if (p.power && p.powerTimer > 0) {
         this.power.classList.remove('hidden');
         this.power.textContent = p.power === 'speed' ? `Zoom! ${Math.ceil(p.powerTimer)}` : `Bubble shield ${Math.ceil(p.powerTimer)}`;
