@@ -12,6 +12,7 @@ import { Sound } from './audio/Sound';
 import { CONFIG, PLAYER_COLORS, type MatchOptions } from './config';
 import { Game, type GameEvent } from './core/Game';
 import { Input } from './input/Input';
+import { loadArt } from './render/Scenery';
 import { World } from './render/World';
 import { Hud } from './ui/Hud';
 import { Store } from './ui/Store';
@@ -452,9 +453,28 @@ if (Capacitor.isNativePlatform()) {
 // ---------- main loop ----------
 
 let last = performance.now();
+// Auto quality: if the first seconds of a match run slowly, switch to faster graphics.
+let perfFrames = 0;
+let perfTime = 0;
+let perfChecked = location.search.includes('debug'); // automated tests run on slow software rendering
+function checkPerformance(dt: number): void {
+  if (perfChecked || phase !== 'playing' || world.currentQuality === 'low') return;
+  perfFrames++;
+  perfTime += dt;
+  if (perfTime < 5) return;
+  perfChecked = true;
+  if (perfFrames / perfTime < 34) {
+    world.setQuality('low');
+    store.settings.quality = 'low';
+    store.save();
+    hud.toast('Switched to faster graphics');
+  }
+}
+
 function loop(now: number): void {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  checkPerformance(dt);
 
   if (phase === 'countdown') {
     countdownLeft -= dt;
@@ -532,5 +552,16 @@ buildLogo();
 buildColorPicker();
 syncDifficulty();
 syncSettingsUI();
-startAttract();
-requestAnimationFrame(loop);
+// Load the 3D art, then start. If it fails (e.g. offline web build), the game still runs with simple shapes.
+const playBtn = $<HTMLButtonElement>('playBtn');
+playBtn.disabled = true;
+playBtn.textContent = 'Loading…';
+loadArt()
+  .then((art) => world.setArt(art))
+  .catch((err) => console.error('art failed to load', err))
+  .finally(() => {
+    playBtn.disabled = false;
+    playBtn.textContent = 'Play';
+    startAttract();
+    requestAnimationFrame(loop);
+  });

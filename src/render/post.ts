@@ -130,6 +130,7 @@ export interface PostOptions {
   tiltShift?: { focus: number; amount: number };
   grade?: { saturation: number; warmth: number; vignette: number; contrast: number };
   smaa?: boolean;
+  msaa?: boolean;
 }
 
 export class Post {
@@ -138,7 +139,7 @@ export class Post {
 
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, opts: PostOptions) {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType });
+    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: opts.msaa ? 4 : 0 });
     if (opts.outline) rt.depthTexture = new THREE.DepthTexture(size.x, size.y);
     this.composer = new EffectComposer(renderer, rt);
     if (opts.outline) {

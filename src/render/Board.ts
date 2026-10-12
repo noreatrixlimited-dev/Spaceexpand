@@ -1,28 +1,39 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { PLAYER_COLORS, PLAYER_COLORS_SOFT } from '../config';
+import { NEUTRAL_TILE, PLAYER_COLORS, TILE_COLORS } from '../config';
 import type { Game } from '../core/Game';
-import { lighten, toon } from './materials';
+import { Rng } from '../core/rng';
+import { bakeMeshes } from './assets';
+import { toon } from './materials';
 import { flowerCenterGeometry, petalsGeometry } from './shapes';
 
-const OWNED_LIFT = 0.14;
-const NEUTRAL_A = new THREE.Color('#fff4de');
-const NEUTRAL_B = new THREE.Color('#fbe6c4');
+const OWNED_LIFT = 0.07;
+const NEUTRAL_A = new THREE.Color(NEUTRAL_TILE[0]);
+const NEUTRAL_B = new THREE.Color(NEUTRAL_TILE[1]);
+
+interface DecorSlot {
+  mesh: number; // index into decorMeshes
+  inst: number;
+  dx: number;
+  dz: number;
+  rot: number;
+  scale: number;
+}
 
 /** World position of a grid cell centre. */
 export function cellToWorld(size: number, x: number, y: number, out = new THREE.Vector3()): THREE.Vector3 {
   return out.set(x - size / 2 + 0.5, 0, y - size / 2 + 0.5);
 }
 
-/** The floating cookie island: tiles, trail flowers, base rock and clouds. */
+/** The playable grid: tiles, small plants on tiles, and trail flowers. */
 export class Board {
   readonly group = new THREE.Group();
   private readonly size: number;
   private readonly tiles: THREE.InstancedMesh;
   private readonly petals: THREE.InstancedMesh;
   private readonly centers: THREE.InstancedMesh;
-  private readonly base: THREE.Group;
-  private readonly clouds: THREE.Group[] = [];
+  private readonly decorMeshes: THREE.InstancedMesh[] = [];
+  private readonly decorOf = new Map<number, DecorSlot[]>();
 
   // What is currently drawn, so we can animate toward the game state.
   private shownOwner: Int8Array;
@@ -45,11 +56,10 @@ export class Board {
   private flowersActive = new Set<number>();
 
   private time = 0;
-  private baseScale = 1;
   private dummy = new THREE.Object3D();
   private tmpColor = new THREE.Color();
 
-  constructor(size: number) {
+  constructor(size: number, plants: THREE.Object3D[] = [], avoid: Set<number> = new Set()) {
     this.size = size;
     const n = size * size;
     this.shownOwner = new Int8Array(n).fill(-2);
@@ -66,12 +76,12 @@ export class Board {
     this.flowerRot = new Float32Array(n);
 
     for (let p = 0; p < 4; p++) {
-      this.colorOf.push([lighten(PLAYER_COLORS_SOFT[p], 0.15), new THREE.Color(PLAYER_COLORS_SOFT[p])]);
+      this.colorOf.push([new THREE.Color(TILE_COLORS[p][0]), new THREE.Color(TILE_COLORS[p][1])]);
     }
 
-    const tileGeo = new RoundedBoxGeometry(0.95, 0.7, 0.95, 2, 0.13);
-    tileGeo.translate(0, -0.35, 0);
-    this.tiles = new THREE.InstancedMesh(tileGeo, toon('#ffffff'), n);
+    const tileGeo = new RoundedBoxGeometry(0.965, 0.6, 0.965, 2, 0.085);
+    tileGeo.translate(0, -0.3, 0);
+    this.tiles = new THREE.InstancedMesh(tileGeo, toon('#ffffff', { roughness: 0.55 }), n);
     this.tiles.receiveShadow = true;
     for (let i = 0; i < n; i++) {
       this.tiles.setColorAt(i, NEUTRAL_A);
@@ -88,51 +98,60 @@ export class Board {
     this.petals.castShadow = false;
     this.group.add(this.petals, this.centers);
 
-    this.base = this.buildBase();
-    this.group.add(this.base);
-    this.buildClouds();
+    this.buildDecor(plants, avoid);
   }
 
-  private buildBase(): THREE.Group {
-    const g = new THREE.Group();
-    const s = this.size + 0.3;
-    const cake = new THREE.Mesh(new RoundedBoxGeometry(s, 1.6, s, 3, 0.5), toon('#f3c690'));
-    cake.position.y = -1.25;
-    const frosting = new THREE.Mesh(new RoundedBoxGeometry(s + 0.25, 0.45, s + 0.25, 3, 0.2), toon('#fff7ea'));
-    frosting.position.y = -0.55;
-    const rock = new THREE.Mesh(new THREE.ConeGeometry(s * 0.68, 9, 4, 1), toon('#c98f5f'));
-    rock.rotation.y = Math.PI / 4;
-    rock.rotation.x = Math.PI;
-    rock.position.y = -6.4;
-    const rock2 = new THREE.Mesh(new THREE.ConeGeometry(s * 0.3, 6, 5, 1), toon('#b97c4f'));
-    rock2.rotation.x = Math.PI;
-    rock2.position.set(s * 0.22, -7.5, -s * 0.15);
-    g.add(cake, frosting, rock, rock2);
-    return g;
-  }
-
-  private buildClouds(): void {
-    const mat = toon('#ffffff', { transparent: true, opacity: 0.95 });
-    const puff = new THREE.SphereGeometry(1, 14, 10);
-    for (let k = 0; k < 9; k++) {
-      const c = new THREE.Group();
-      const parts = 3 + (k % 3);
-      for (let j = 0; j < parts; j++) {
-        const m = new THREE.Mesh(puff, mat);
-        const r = 1.4 + ((k * 7 + j * 3) % 5) * 0.35;
-        m.scale.setScalar(r);
-        m.position.set(j * 1.8 - parts * 0.9, ((j * 5) % 3) * 0.3, ((j * 3) % 2) * 0.8);
-        c.add(m);
-      }
-      const a = (k / 9) * Math.PI * 2;
-      const rad = this.size * 0.75 + (k % 3) * 4;
-      c.position.set(Math.cos(a) * rad, -5 - (k % 4) * 2.2, Math.sin(a) * rad);
-      c.userData.angle = a;
-      c.userData.rad = rad;
-      c.userData.speed = 0.01 + (k % 3) * 0.006;
-      this.clouds.push(c);
-      this.group.add(c);
+  /** Sprinkle small leafy plants on a few tiles; they ride along with tile animations. */
+  private buildDecor(plants: THREE.Object3D[], avoid: Set<number>): void {
+    if (!plants.length) return;
+    const rng = new Rng(3);
+    const n = this.size * this.size;
+    const cells: number[][] = plants.map(() => []);
+    for (let i = 0; i < n; i++) {
+      if (avoid.has(i) || rng.next() > 0.075) continue;
+      cells[rng.int(0, plants.length - 1)].push(i);
     }
+    plants.forEach((p, k) => {
+      const parts = bakeMeshes(p);
+      parts.forEach(({ geometry, material }) => {
+        const mat = toon('#ffffff', { map: (material as THREE.MeshStandardMaterial).map ?? null });
+        const mesh = new THREE.InstancedMesh(geometry, mat, Math.max(1, cells[k].length));
+        mesh.count = cells[k].length;
+        mesh.castShadow = false;
+        mesh.receiveShadow = true;
+        const meshIdx = this.decorMeshes.length;
+        this.decorMeshes.push(mesh);
+        this.group.add(mesh);
+        cells[k].forEach((cell, inst) => {
+          const slot: DecorSlot = {
+            mesh: meshIdx,
+            inst,
+            dx: (rng.next() - 0.5) * 0.4,
+            dz: (rng.next() - 0.5) * 0.4,
+            rot: rng.next() * Math.PI * 2,
+            scale: 0.75 + rng.next() * 0.3,
+          };
+          const list = this.decorOf.get(cell) ?? [];
+          list.push(slot);
+          this.decorOf.set(cell, list);
+          this.writeDecor(cell, slot);
+        });
+      });
+    });
+  }
+
+  private writeDecor(cell: number, slot: DecorSlot): void {
+    const d = this.dummy;
+    cellToWorld(this.size, cell % this.size, Math.floor(cell / this.size), d.position);
+    d.position.x += slot.dx;
+    d.position.z += slot.dz;
+    d.position.y = this.lift[cell] + this.fallY[cell];
+    d.rotation.set(0, slot.rot, 0);
+    const gone = this.shownVoid[cell] && this.fallY[cell] < -8;
+    d.scale.setScalar(gone ? 0.0001 : slot.scale);
+    d.updateMatrix();
+    this.decorMeshes[slot.mesh].setMatrixAt(slot.inst, d.matrix);
+    this.decorMeshes[slot.mesh].instanceMatrix.needsUpdate = true;
   }
 
   private neutralColor(i: number): THREE.Color {
@@ -153,6 +172,8 @@ export class Board {
     d.rotation.set(this.fallY[i] * 0.05, 0, this.fallY[i] * -0.04);
     d.updateMatrix();
     this.tiles.setMatrixAt(i, d.matrix);
+    const decor = this.decorOf.get(i);
+    if (decor) for (const slot of decor) this.writeDecor(i, slot);
   }
 
   /** Schedule a wave of tiles popping up, rippling out from (fx, fy). */
@@ -245,16 +266,6 @@ export class Board {
 
     this.updateFlowers(dt);
 
-    // Island base shrinks with the void.
-    const targetScale = Math.max(0.2, (this.size - game.voidRing * 2) / this.size);
-    this.baseScale += (targetScale - this.baseScale) * Math.min(1, dt * 2);
-    this.base.scale.set(this.baseScale, 1, this.baseScale);
-
-    for (const c of this.clouds) {
-      c.userData.angle += c.userData.speed * dt;
-      c.position.x = Math.cos(c.userData.angle) * c.userData.rad;
-      c.position.z = Math.sin(c.userData.angle) * c.userData.rad;
-    }
   }
 
   private addFlower(cell: number, owner: number): void {
@@ -319,7 +330,7 @@ export class Board {
       d.position.y = this.lift[cell] + 0.01;
       // overshoot pop
       const pop = target > 0 ? Math.sin(Math.min(1, ns) * Math.PI) * 0.35 : 0;
-      d.scale.setScalar(Math.max(0.0001, ns + pop));
+      d.scale.setScalar(Math.max(0.0001, (ns + pop) * 1.2));
       d.rotation.set(0, this.flowerRot[cell], 0);
       d.updateMatrix();
       this.petals.setMatrixAt(slot, d.matrix);

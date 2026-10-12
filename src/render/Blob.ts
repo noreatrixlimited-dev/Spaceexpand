@@ -14,7 +14,7 @@ export type BlobMood = 'normal' | 'bonked' | 'ghost' | 'happy' | 'sad';
 export class Blob {
   readonly root = new THREE.Group();
   private readonly body = new THREE.Group(); // squashes
-  private readonly bodyMat: THREE.MeshToonMaterial;
+  private readonly bodyMat: THREE.MeshStandardMaterial;
   private readonly outline: THREE.Mesh;
   private readonly feet: THREE.Mesh[] = [];
   private readonly eyes: THREE.Group[] = [];

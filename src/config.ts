@@ -38,7 +38,15 @@ export interface MatchOptions {
   seed: number;
 }
 
-export const PLAYER_NAMES = ['Lavender', 'Coral', 'Sky', 'Mint'];
+export const PLAYER_NAMES = ['Grape', 'Cherry', 'Berry', 'Lime'];
 // P1 top-left, P2 bottom-left, P3 bottom-right, P4 top-right (matches the original sketch)
-export const PLAYER_COLORS = ['#a98bf0', '#ff7b7b', '#5ab8ff', '#4fd6a0'];
-export const PLAYER_COLORS_SOFT = ['#d6c7fa', '#ffc0bb', '#b4dcff', '#aeeccf'];
+export const PLAYER_COLORS = ['#9b5de5', '#f25454', '#3d9df2', '#5bbf3f'];
+export const PLAYER_COLORS_SOFT = ['#c9a8f5', '#ffa3a3', '#9fd0ff', '#a7e38f'];
+/** Territory tile colours per player (checker pair), and unclaimed land. */
+export const TILE_COLORS: [string, string][] = [
+  ['#a46af2', '#985de8'],
+  ['#f66262', '#ec5555'],
+  ['#55aef6', '#479fee'],
+  ['#86d052', '#79c646'],
+];
+export const NEUTRAL_TILE: [string, string] = ['#ffe45e', '#fdd94a'];

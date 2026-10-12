@@ -13,7 +13,7 @@ export class EggView {
   private readonly eggBody = new THREE.Group();
   private readonly hearts: THREE.Mesh[] = [];
   private readonly heartGroup = new THREE.Group();
-  private readonly eggMat: THREE.MeshToonMaterial;
+  private readonly eggMat: THREE.MeshStandardMaterial;
   private readonly eyes: THREE.Mesh[] = [];
   private readonly mouth: THREE.Mesh;
   private wobble = 0;

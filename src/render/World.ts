@@ -4,10 +4,16 @@ import type { Game, GameEvent } from '../core/Game';
 import { DX, DY } from '../core/Grid';
 import { Blob } from './Blob';
 import { Board, cellToWorld } from './Board';
+import { Critter } from './Critter';
 import { EggView } from './Egg';
 import { toon } from './materials';
 import { Particles } from './Particles';
+import { Post } from './post';
+import { Scenery, type Art } from './Scenery';
 import { starGeometry } from './shapes';
+
+type Avatar = Blob | Critter;
+export type Quality = 'high' | 'low';
 
 export type CameraMode = 'follow' | 'overview' | 'orbit';
 
@@ -22,7 +28,11 @@ export class World {
   private readonly matchGroup = new THREE.Group();
   private game: Game | null = null;
   private board: Board | null = null;
-  private blobs: Blob[] = [];
+  private blobs: Avatar[] = [];
+  private art: Art | null = null;
+  private scenery: Scenery | null = null;
+  private post: Post | null = null;
+  private quality: Quality;
   private eggs: EggView[] = [];
   private blobPos: THREE.Vector3[] = [];
   private nestPos: THREE.Vector3[] = [];
@@ -35,18 +45,24 @@ export class World {
   followId = 0;
   zoom = 1;
 
-  constructor(canvas: HTMLCanvasElement, quality: 'high' | 'low') {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality === 'high', alpha: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality === 'high' ? 2 : 1.25));
+  constructor(canvas: HTMLCanvasElement, quality: Quality) {
+    this.quality = quality;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.shadowMap.enabled = quality === 'high';
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
+    this.renderer.toneMappingExposure = 1.08;
 
-    this.scene.add(new THREE.HemisphereLight('#fff6e8', '#f2b8c6', 1.6));
-    this.sun = new THREE.DirectionalLight('#ffffff', 2.2);
-    this.sun.position.set(-8, 20, 10);
+    // Warm golden daylight with a cool sky fill.
+    this.scene.add(new THREE.HemisphereLight('#e3f4ff', '#d9a36a', 1.35));
+    this.sun = new THREE.DirectionalLight('#fff0d4', 2.8);
+    this.sun.position.set(-10, 22, 14);
     this.sun.castShadow = quality === 'high';
-    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.normalBias = 0.02;
+    this.sun.shadow.radius = 3;
     const sc = this.sun.shadow.camera;
     sc.left = -16;
     sc.right = 16;
@@ -61,13 +77,39 @@ export class World {
     this.starMesh.castShadow = true;
     this.starMesh.visible = false;
     this.scene.add(this.matchGroup, this.particles.mesh, this.starMesh);
+    this.buildPost();
     this.resize();
   }
 
-  setQuality(q: 'high' | 'low'): void {
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q === 'high' ? 2 : 1.25));
+  private pixelRatio(): number {
+    return Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : 1.25);
+  }
+
+  /** Outlines + light colour grade on high quality; no blur, bloom or fog. */
+  private buildPost(): void {
+    this.post = null;
+    if (this.quality !== 'high') return;
+    this.post = new Post(this.renderer, this.scene, this.camera, {
+      outline: { color: '#3b2340', thickness: 1, strength: 0.6 },
+      grade: { saturation: 1.1, warmth: 0.08, vignette: 0.12, contrast: 1.04 },
+      msaa: true,
+    });
+  }
+
+  setArt(art: Art): void {
+    this.art = art;
+  }
+
+  get currentQuality(): Quality {
+    return this.quality;
+  }
+
+  setQuality(q: Quality): void {
+    this.quality = q;
+    this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.shadowMap.enabled = q === 'high';
     this.sun.castShadow = q === 'high';
+    this.buildPost();
     this.scene.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.Material | undefined;
       if (m) m.needsUpdate = true;
@@ -79,6 +121,7 @@ export class World {
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.renderer.setSize(w, h, false);
+    this.post?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -92,14 +135,27 @@ export class World {
     this.matchGroup.clear();
     this.game = game;
     const size = game.grid.size;
-    this.board = new Board(size);
+    // Keep plants off the nests and their surroundings.
+    const avoid = new Set<number>();
+    for (const c of game.cores) {
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (game.grid.inside(c.x + dx, c.y + dy)) avoid.add(game.grid.idx(c.x + dx, c.y + dy));
+    }
+    this.board = new Board(size, this.art?.plants ?? [], avoid);
     this.matchGroup.add(this.board.group);
+    if (!this.scenery) {
+      this.scenery = new Scenery(size, this.art);
+      this.scene.add(this.scenery.group);
+    } else {
+      this.scene.remove(this.scenery.group);
+      this.scenery = new Scenery(size, this.art);
+      this.scene.add(this.scenery.group);
+    }
     this.blobs = [];
     this.eggs = [];
     this.blobPos = [];
     this.nestPos = [];
     for (const p of game.players) {
-      const b = new Blob(p.id, p.isHuman);
+      const b: Avatar = this.art ? new Critter(p.id, p.isHuman, this.art.character) : new Blob(p.id, p.isHuman);
       this.blobs.push(b);
       const pos = cellToWorld(size, p.x, p.y);
       this.blobPos.push(pos.clone());
@@ -251,7 +307,7 @@ export class World {
         egg.threatened = c.threatened;
         if (c.state === 'carried' && c.carrier >= 0) {
           const carrierPos = this.blobPos[c.carrier];
-          egg.egg.position.lerp(tmp.copy(carrierPos).setY(carrierPos.y + 0.75), 1 - Math.exp(-dt * 20));
+          egg.egg.position.lerp(tmp.copy(carrierPos).setY(carrierPos.y + (this.art ? 1.6 : 0.75)), 1 - Math.exp(-dt * 20));
         } else {
           egg.egg.position.lerp(this.nestPos[p.id], 1 - Math.exp(-dt * 10));
         }
@@ -270,15 +326,17 @@ export class World {
       }
     }
     this.particles.update(dt);
+    this.scenery?.update(dt, game ? game.voidRing : 0);
     this.updateCamera(dt);
-    this.renderer.render(this.scene, this.camera);
+    if (this.post) this.post.render(dt);
+    else this.renderer.render(this.scene, this.camera);
   }
 
   private updateCamera(dt: number): void {
     const game = this.game;
     const size = game ? game.grid.size : 40;
     const aspect = this.camera.aspect;
-    const tilt = new THREE.Vector3(0, 1, 0.72).normalize();
+    const tilt = new THREE.Vector3(0, 1, 0.98).normalize();
     const vfov = (this.camera.fov * Math.PI) / 180;
     let desired: THREE.Vector3;
     let dist: number;

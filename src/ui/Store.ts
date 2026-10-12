@@ -11,6 +11,7 @@ export interface Settings {
   slot: number;
   vibrate: boolean;
   seenHowTo: boolean;
+  artVersion?: number;
 }
 
 export interface Stats {
@@ -22,6 +23,8 @@ export interface Stats {
 }
 
 const KEY = 'nestnappers.v1';
+// Bumped when the art upgrade landed so everyone starts on the new high-quality look.
+const ART_VERSION = 2;
 
 const defaults = (): { settings: Settings; stats: Stats } => ({
   settings: {
@@ -30,7 +33,7 @@ const defaults = (): { settings: Settings; stats: Stats } => ({
     hardMode: false,
     startMode: 'patch',
     controls: 'swipe',
-    quality: /Android|iPhone|iPad/i.test(navigator.userAgent) ? 'low' : 'high',
+    quality: 'high',
     difficulty: 'normal',
     slot: 0,
     vibrate: true,
@@ -53,6 +56,10 @@ export class Store {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<{ settings: Settings; stats: Stats }>;
         this.settings = { ...d.settings, ...parsed.settings };
+        if ((this.settings.artVersion ?? 1) < ART_VERSION) {
+          this.settings.quality = 'high';
+          this.settings.artVersion = ART_VERSION;
+        }
         this.stats = { ...d.stats, ...parsed.stats };
       }
     } catch {
