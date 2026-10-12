@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Temp Chat</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f2f4f7; color: #1d2433; height: 100dvh; display: flex; flex-direction: column; }
+  header { background: #3b5bdb; color: #fff; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header button { margin-left: auto; }
+  #members { font-size: 13px; opacity: .9; width: 100%; }
+  #join { margin: auto; background: #fff; padding: 24px; border-radius: 12px; width: min(360px, 92vw); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 4px 20px #0001; }
+  #join h2 { margin: 0 0 6px; }
+  input, button { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid #c9ced6; }
+  button { background: #3b5bdb; color: #fff; border: none; cursor: pointer; }
+  button.light { background: #fff; color: #3b5bdb; }
+  #chat { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 80%; background: #fff; padding: 8px 12px; border-radius: 10px; box-shadow: 0 1px 2px #0001; word-wrap: break-word; }
+  .msg.me { align-self: flex-end; background: #dbe4ff; }
+  .msg .who { font-size: 12px; font-weight: 600; color: #3b5bdb; }
+  .msg .time { font-size: 11px; color: #868e96; margin-left: 6px; font-weight: 400; }
+  .msg img, .msg video { max-width: 100%; max-height: 300px; border-radius: 6px; display: block; margin-top: 4px; }
+  .system { align-self: center; font-size: 12px; color: #868e96; }
+  form#send { display: flex; gap: 8px; padding: 10px; background: #fff; border-top: 1px solid #dee2e6; }
+  form#send input[type=text] { flex: 1; min-width: 0; }
+  #fileBtn { background: #e9ecef; color: #1d2433; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Temp Chat</h1>
+  <span id="roomLabel"></span>
+  <button id="copyLink" class="light" style="display:none">Copy invite link</button>
+  <div id="members"></div>
+</header>
+
+<form id="join">
+  <h2>Join a room</h2>
+  <input id="name" placeholder="Your name" maxlength="30" required>
+  <input id="room" placeholder="Room code" maxlength="40" required>
+  <button type="submit">Join</button>
+  <small>Share the room link only with people you know. Messages vanish when everyone leaves.</small>
+</form>
+
+<div id="chat">
+  <div id="log"></div>
+  <form id="send">
+    <button type="button" id="fileBtn" title="Send file">📎</button>
+    <input type="file" id="file" hidden multiple>
+    <input type="text" id="text" placeholder="Type a message" autocomplete="off">
+    <button type="submit">Send</button>
+  </form>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const socket = io();
+  let myName = '';
+
+  const params = new URLSearchParams(location.search);
+  $('room').value = params.get('room') || Math.random().toString(36).slice(2, 8);
+  $('name').value = localStorage.getItem('chatName') || '';
+
+  $('join').addEventListener('submit', (e) => {
+    e.preventDefault();
+    myName = $('name').value.trim();
+    const room = $('room').value.trim();
+    if (!myName || !room) return;
+    localStorage.setItem('chatName', myName);
+    history.replaceState(null, '', '?room=' + encodeURIComponent(room));
+    socket.emit('join', { room, name: myName });
+    $('join').style.display = 'none';
+    $('chat').style.display = 'flex';
+    $('roomLabel').textContent = 'Room: ' + room;
+    $('copyLink').style.display = '';
+    $('text').focus();
+  });
+
+  $('copyLink').onclick = async () => {
+    await navigator.clipboard.writeText(location.href);
+    $('copyLink').textContent = 'Copied!';
+    setTimeout(() => ($('copyLink').textContent = 'Copy invite link'), 1500);
+  };
+
+  $('send').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = $('text').value;
+    if (!text.trim()) return;
+    socket.emit('text', text);
+    $('text').value = '';
+  });
+
+  $('fileBtn').onclick = () => $('file').click();
+  $('file').onchange = async () => {
+    for (const f of $('file').files) {
+      if (f.size > 20 * 1024 * 1024) { alert(f.name + ' is larger than 20 MB'); continue; }
+      socket.emit('file', { name: f.name, mime: f.type, data: await f.arrayBuffer() });
+    }
+    $('file').value = '';
+  };
+
+  function render(m) {
+    const log = $('log');
+    const div = document.createElement('div');
+    if (m.type === 'system') {
+      div.className = 'system';
+      div.textContent = m.text;
+    } else {
+      div.className = 'msg' + (m.from === myName ? ' me' : '');
+      const who = document.createElement('div');
+      who.className = 'who';
+      who.textContent = m.from;
+      const time = document.createElement('span');
+      time.className = 'time';
+      time.textContent = new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      who.appendChild(time);
+      div.appendChild(who);
+      if (m.type === 'text') {
+        const t = document.createElement('div');
+        t.textContent = m.text;
+        div.appendChild(t);
+      } else {
+        const url = URL.createObjectURL(new Blob([m.data], { type: m.mime }));
+        if (m.mime.startsWith('image/')) {
+          const img = document.createElement('img'); img.src = url; div.appendChild(img);
+        } else if (m.mime.startsWith('video/')) {
+          const v = document.createElement('video'); v.src = url; v.controls = true; div.appendChild(v);
+        }
+        const a = document.createElement('a');
+        a.href = url; a.download = m.name; a.textContent = '⬇ ' + m.name;
+        div.appendChild(a);
+      }
+    }
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  socket.on('history', (list) => { $('log').innerHTML = ''; list.forEach(render); });
+  socket.on('message', render);
+  socket.on('members', (list) => { $('members').textContent = 'Online: ' + list.join(', '); });
+</script>
+</body>
+</html>
