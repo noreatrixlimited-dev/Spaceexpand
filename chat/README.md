@@ -1,6 +1,6 @@
-# Temp Chat
+# Noreatrix Chat
 
-A simple temporary chat for people you know: text messages and file sharing (up to 20 MB).
+A simple temporary chat, styled like the Noreatrix website, for people you know: text messages and file sharing (up to 20 MB).
 
 - Nothing is saved to disk. Messages and files live in server memory.
 - When the last person leaves a room, the room and everything in it is deleted.
