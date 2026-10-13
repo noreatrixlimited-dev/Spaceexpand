@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { mapOutline, type MapDef } from '../maps';
+import { mapInset, mapOutline, type MapDef } from '../maps';
 import { loadGltf } from './assets';
 import { toon } from './materials';
 
@@ -32,6 +32,9 @@ export function prepModel(root: THREE.Object3D, opts: { shadows?: boolean; color
  * Clean, Paper.io-like surroundings: a soft gradient sky with a sun glow, an animated themed sea
  * with little islets, and the island slab (shaped like the map) that shrinks as the clouds eat the edge.
  */
+/** World-unit width of the baked coast distance texture used by the sea. */
+const SEA_SDF_SPAN = 96;
+
 export class Scenery {
   readonly group = new THREE.Group();
   private readonly slab = new THREE.Group();
@@ -79,33 +82,44 @@ export class Scenery {
   /** Animated sea around the island: shallow colour near the shore, foam rings lapping at the edge. */
   private buildSea(shallow: string, deep: string): void {
     const m = this.map;
-    const shape = m.shape === 'circle' ? 0 : m.shape === 'roundSquare' ? 1 : 2;
+    // Bake the coast's signed distance into a small texture, so any island shape gets foam.
+    const R = 128;
+    const span = SEA_SDF_SPAN;
+    const data = new Uint8Array(R * R);
+    for (let j = 0; j < R; j++)
+      for (let i = 0; i < R; i++) {
+        const x = ((i + 0.5) / R - 0.5) * span;
+        const z = ((j + 0.5) / R - 0.5) * span;
+        const d = -(mapInset(m, x, z) - 0.35); // distance out from the shore
+        data[j * R + i] = Math.max(0, Math.min(255, Math.round(((d + 8) / 64) * 255)));
+      }
+    const sdf = new THREE.DataTexture(data, R, R, THREE.RedFormat, THREE.UnsignedByteType);
+    sdf.magFilter = THREE.LinearFilter;
+    sdf.minFilter = THREE.LinearFilter;
+    sdf.wrapS = sdf.wrapT = THREE.ClampToEdgeWrapping;
+    sdf.needsUpdate = true;
     this.sea = new THREE.ShaderMaterial({
       uniforms: {
         uShallow: { value: new THREE.Color(shallow) },
         uDeep: { value: new THREE.Color(deep) },
         uTime: { value: 0 },
         uScale: { value: 1 },
-        uSize: { value: m.size + 0.35 },
-        uCorner: { value: m.corner + 0.35 },
-        uShape: { value: shape },
+        uSdf: { value: sdf },
+        uSpan: { value: span },
       },
       vertexShader: `varying vec2 vW;
         void main(){ vW = position.xy * vec2(1.0, -1.0); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
       fragmentShader: `uniform vec3 uShallow; uniform vec3 uDeep; uniform float uTime; uniform float uScale;
-        uniform float uSize; uniform float uCorner; uniform int uShape; varying vec2 vW;
-        float inset(vec2 p) {
-          float s = uSize;
-          if (uShape == 0) return s - length(p);
-          if (uShape == 1) {
-            vec2 q = abs(p) - vec2(s - uCorner);
-            return uCorner - length(max(q, 0.0)) - min(max(q.x, q.y), 0.0);
-          }
-          vec2 a = abs(p);
-          return s * 0.8660254 - max(a.y, a.x * 0.8660254 + a.y * 0.5);
+        uniform sampler2D uSdf; uniform float uSpan; varying vec2 vW;
+        float shore(vec2 p) {
+          vec2 uv = p / uSpan + 0.5;
+          float d = texture2D(uSdf, clamp(uv, 0.0, 1.0)).r * 64.0 - 8.0;
+          // beyond the baked area, keep growing with distance
+          vec2 o = max(abs(uv - 0.5) - 0.5, 0.0) * uSpan;
+          return d + length(o);
         }
         void main(){
-          float d = -inset(vW / uScale) * uScale; // distance out from the shore
+          float d = shore(vW / uScale) * uScale; // distance out from the shore
           float t = uTime;
           // gentle ripples
           float w = sin(vW.x * 0.35 + t * 0.9) * sin(vW.y * 0.31 - t * 0.7) + sin((vW.x + vW.y) * 0.21 + t * 0.5) * 0.6;

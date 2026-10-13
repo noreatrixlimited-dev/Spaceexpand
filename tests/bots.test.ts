@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { Bots } from '../src/ai/Bot';
 import { CONFIG, type Difficulty } from '../src/config';
 import { Game } from '../src/core/Game';
+import { LEVEL_MAPS } from '../src/maps';
 
-function simulate(seed: number, difficulty: Difficulty) {
-  const game = new Game({ startMode: 'patch', hardMode: false, humanSlot: null, difficulty, seed });
+function simulate(seed: number, difficulty: Difficulty, map?: string) {
+  const game = new Game({ map, startMode: 'patch', hardMode: false, humanSlot: null, difficulty, seed });
   new Bots(game, difficulty);
   const dt = 1 / CONFIG.tickRate;
   let ticks = 0;
@@ -36,6 +37,14 @@ describe('bots', () => {
       }
     });
   }
+
+  it('every island level plays a full match', () => {
+    for (const m of LEVEL_MAPS) {
+      const r = simulate(3, 'normal', m.id);
+      expect(r.game.over).toBe(true);
+      expect(r.captures).toBeGreaterThan(10);
+    }
+  });
 
   it('bots fight each other (bonks happen)', () => {
     let total = 0;

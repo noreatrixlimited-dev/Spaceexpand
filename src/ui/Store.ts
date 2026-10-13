@@ -23,6 +23,10 @@ export interface Stats {
   trailsCut: number;
   /** Recent results, oldest first, e.g. "WLW" (used by the match director). */
   recent: string;
+  /** How many island levels are open (win the last open one to open the next). */
+  unlocked: number;
+  /** Won the final island. */
+  champion: boolean;
 }
 
 const KEY = 'nestnappers.v1';
@@ -40,10 +44,10 @@ const defaults = (): { settings: Settings; stats: Stats } => ({
     slot: 0,
     vibrate: true,
     seenHowTo: false,
-    map: 'classic',
+    map: 'clover',
     tutorialDone: false,
   },
-  stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '' },
+  stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '', unlocked: 1, champion: false },
 });
 
 /** Settings and lifetime stats, saved in localStorage (best effort). */

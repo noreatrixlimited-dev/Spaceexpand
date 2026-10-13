@@ -11,6 +11,7 @@ import { Post } from './post';
 import { Scenery, type Art } from './Scenery';
 import { starGeometry } from './shapes';
 import { Territory } from './Territory';
+import { WorldMap } from './WorldMap';
 
 type Avatar = Blob | Critter;
 const SWOOP_TIME = 2.6;
@@ -55,6 +56,9 @@ export class World {
   private autoZoom = 1;
   private swoop = 0;
   mode: CameraMode = 'orbit';
+  /** The world map between matches (built on first use); shown instead of the match when `showAtlas`. */
+  atlas: WorldMap | null = null;
+  showAtlas = false;
   followId = 0;
   zoom = 1;
 
@@ -116,6 +120,15 @@ export class World {
     this.art = art;
   }
 
+  /** The world map, built the first time it's needed. */
+  getAtlas(slot: number): WorldMap {
+    if (!this.atlas) {
+      this.atlas = new WorldMap(this.art, slot);
+      this.atlas.resize(this.camera.aspect);
+    }
+    return this.atlas;
+  }
+
   get currentQuality(): Quality {
     return this.quality;
   }
@@ -140,6 +153,7 @@ export class World {
     this.post?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.atlas?.resize(w / h);
   }
 
   /** Grid cell centre -> world position. */
@@ -307,6 +321,11 @@ export class World {
   /** Render a frame (the game runs at 60 ticks/s; positions are eased toward the latest tick). */
   frame(dt: number): void {
     this.time += dt;
+    if (this.showAtlas && this.atlas) {
+      this.atlas.update(dt);
+      this.renderer.render(this.atlas.scene, this.atlas.camera);
+      return;
+    }
     const game = this.game;
     if (game && this.territory) {
       const n = game.grid.size;

@@ -1296,3 +1296,77 @@ button:active {
 #hud.spectating #power {
   display: none !important;
 }
+
+/* ---------- world map (title) ---------- */
+.screen.map-screen {
+  background: none;
+  pointer-events: none;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  overflow: hidden;
+}
+.map-screen > * {
+  pointer-events: auto;
+}
+.map-screen .map-top {
+  pointer-events: none;
+  text-align: center;
+}
+.map-screen .map-top .logo {
+  font-size: clamp(40px, 12vw, 64px);
+  margin: 4px 0 0;
+  filter: drop-shadow(0 4px 0 rgba(255, 255, 255, 0.9)) drop-shadow(0 8px 18px rgba(40, 80, 120, 0.25));
+}
+.map-screen .map-bottom {
+  padding: 16px 18px 14px;
+  text-align: center;
+  transition:
+    transform 0.45s cubic-bezier(0.2, 1.4, 0.4, 1),
+    opacity 0.3s ease;
+}
+.map-screen.traveling .map-bottom {
+  transform: translateY(130%);
+  opacity: 0;
+  pointer-events: none;
+}
+.level-tag {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  background: rgba(74, 54, 84, 0.07);
+  border-radius: 999px;
+  padding: 3px 12px;
+}
+.island-name {
+  margin: 6px 0 2px;
+  font-size: 28px;
+}
+.map-screen .tagline {
+  margin: 0 0 12px;
+}
+.map-screen .tools {
+  margin-top: 10px;
+}
+.map-screen #customize {
+  margin-top: 10px;
+}
+.map-bottom.shake {
+  animation: shake 0.4s ease;
+}
+@keyframes shake {
+  20% {
+    transform: translateX(-8px);
+  }
+  40% {
+    transform: translateX(7px);
+  }
+  60% {
+    transform: translateX(-5px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
+}

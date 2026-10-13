@@ -11,7 +11,7 @@ import { Bots } from './ai/Bot';
 import { Director, pickMood } from './ai/Director';
 import { Sound } from './audio/Sound';
 import { CONFIG, PLAYER_COLORS, UNIT, type MatchOptions } from './config';
-import { MAPS } from './maps';
+import { LEVEL_MAPS } from './maps';
 import { Game, type GameEvent } from './core/Game';
 import { Input } from './input/Input';
 import { loadArt } from './render/Scenery';
@@ -35,7 +35,8 @@ let combo = { lastCapture: -99, bonkedBy: -1, bonkedAt: -99, cuts: 0 };
 let heartbeatTimer = 0;
 let replayLeft = -1;
 let smoothDt = 1 / 60;
-let humanOut = false; // your nest fell: you watch the rest of the match
+let humanOut = false;
+let nextIsland = false; // the results screen leads on to the world map // your nest fell: you watch the rest of the match
 let phase: Phase = 'menu';
 let human: number | null = null;
 let accumulator = 0;
@@ -61,30 +62,109 @@ function buildLogo(): void {
     .join('');
 }
 
-const MAP_ICONS: Record<string, string> = {
-  circle: '<circle cx="22" cy="22" r="18"/>',
-  roundSquare: '<rect x="4" y="4" width="36" height="36" rx="10"/>',
-  hexagon: '<polygon points="40,22 31,37.6 13,37.6 4,22 13,6.4 31,6.4"/>',
-};
+// ---------- world map ----------
 
-function buildMapPicker(): void {
-  const wrap = $('maps');
-  wrap.innerHTML = '';
-  for (const m of MAPS) {
-    const b = document.createElement('button');
-    b.className = 'map-card' + (store.settings.map === m.id ? ' selected' : '');
-    b.style.setProperty('--mc', m.theme.ui);
-    b.innerHTML = `<svg viewBox="0 0 44 44" fill="${m.theme.slabTop}" stroke="${m.theme.ui}" stroke-width="3">${MAP_ICONS[m.shape]}</svg>${m.name}`;
-    b.onclick = () => {
-      sound.unlock();
-      sound.click();
-      store.settings.map = m.id;
-      store.save();
-      buildMapPicker();
-      if (phase === 'menu') newGame(null); // show the chosen map behind the menu
-    };
-    wrap.appendChild(b);
+/** Index of the selected island level (always an unlocked one). */
+function levelIndex(): number {
+  const i = LEVEL_MAPS.findIndex((m) => m.id === store.settings.map);
+  return Math.max(0, Math.min(store.stats.unlocked - 1, i < 0 ? 0 : i));
+}
+
+function beatenCount(): number {
+  return store.stats.champion ? LEVEL_MAPS.length : store.stats.unlocked - 1;
+}
+
+/** A trip to make the next time the world map opens (after winning an island). */
+let pendingTravel: { from: number; to: number } | null = null;
+
+function showIslandCard(): void {
+  const i = levelIndex();
+  const m = LEVEL_MAPS[i];
+  $('levelTag').textContent = `Island ${i + 1} of ${LEVEL_MAPS.length}` + (i < beatenCount() ? '  ·  won' : '');
+  $('islandName').textContent = m.name;
+  $('islandName').style.color = m.theme.ui;
+  $('islandBlurb').textContent = m.blurb;
+}
+
+function openWorldMap(): void {
+  const atlas = world.getAtlas(store.settings.slot);
+  world.showAtlas = true;
+  const title = $('title');
+  const trip = pendingTravel;
+  pendingTravel = null;
+  if (trip) {
+    // Stand on the island just won, then ride to the next one; the Play card pops up on arrival.
+    store.settings.map = LEVEL_MAPS[trip.from].id;
+    atlas.setState(store.stats.unlocked, beatenCount(), trip.from, store.settings.slot);
+    store.settings.map = LEVEL_MAPS[trip.to].id;
+    store.save();
+    title.classList.add('traveling');
+    window.setTimeout(() => {
+      sound.whoosh();
+      atlas.travel(trip.from, trip.to, () => {
+        title.classList.remove('traveling');
+        showIslandCard();
+        sound.click();
+        vibrate(20);
+      });
+    }, 700);
+  } else {
+    title.classList.remove('traveling');
+    atlas.setState(store.stats.unlocked, beatenCount(), levelIndex(), store.settings.slot);
   }
+  showIslandCard();
+}
+
+/** Tap an island to ride there; drag to look around. */
+function setupMapTouch(): void {
+  const canvas = $('scene');
+  let down: { x: number; y: number; moved: number } | null = null;
+  const active = () => phase === 'menu' && world.showAtlas && world.atlas && !world.atlas.busy;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (active()) down = { x: e.clientX, y: e.clientY, moved: 0 };
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!down || !active()) return;
+    const dx = e.clientX - down.x;
+    const dy = e.clientY - down.y;
+    down.moved += Math.abs(dx) + Math.abs(dy);
+    down.x = e.clientX;
+    down.y = e.clientY;
+    if (down.moved > 10) world.atlas!.drag(dx, dy);
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    const d = down;
+    down = null;
+    if (!d || d.moved > 10 || !active()) return;
+    const atlas = world.atlas!;
+    const i = atlas.pick((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    if (i < 0) return;
+    sound.unlock();
+    if (i >= store.stats.unlocked) {
+      sound.empty();
+      vibrate(30);
+      const card = $('title').querySelector('.map-bottom') as HTMLElement;
+      card.classList.remove('shake');
+      void card.offsetWidth;
+      card.classList.add('shake');
+      $('islandBlurb').textContent = `Win island ${store.stats.unlocked} to unlock ${LEVEL_MAPS[i].name}!`;
+      return;
+    }
+    sound.click();
+    const from = atlas.current;
+    store.settings.map = LEVEL_MAPS[i].id;
+    store.save();
+    if (from === i) {
+      atlas.drag(0, 0);
+      atlas.setState(store.stats.unlocked, beatenCount(), i, store.settings.slot);
+      return;
+    }
+    $('title').classList.add('traveling');
+    atlas.travel(from, i, () => {
+      $('title').classList.remove('traveling');
+      showIslandCard();
+    });
+  });
 }
 
 function buildColorPicker(): void {
@@ -101,7 +181,7 @@ function buildColorPicker(): void {
       store.settings.slot = i;
       store.save();
       buildColorPicker();
-buildMapPicker();
+      if (phase === 'menu') openWorldMap();
     };
     wrap.appendChild(b);
   });
@@ -143,7 +223,7 @@ function applySettings(): void {
 function newGame(humanSlot: number | null, tutorial = false): void {
   const opts: MatchOptions = {
     tutorial,
-    map: store.settings.map,
+    map: LEVEL_MAPS[levelIndex()].id,
     startMode: store.settings.startMode,
     hardMode: store.settings.hardMode,
     humanSlot,
@@ -176,8 +256,10 @@ function newGame(humanSlot: number | null, tutorial = false): void {
 function startAttract(): void {
   phase = 'menu';
   input.enabled = false;
-  newGame(null);
+  replayLeft = -1;
+  againBtn.textContent = 'Play again';
   hud.show(false);
+  openWorldMap();
   applySettings();
   updateStatsLine();
   showScreen('title');
@@ -187,6 +269,7 @@ function startMatch(): void {
   sound.unlock();
   sound.startMusic();
   newGame(store.settings.slot);
+  world.showAtlas = false;
   world.startSwoop();
   showScreen(null);
   hud.show(true);
@@ -220,6 +303,7 @@ function startTutorial(): void {
   sound.unlock();
   sound.startMusic();
   newGame(store.settings.slot, true);
+  world.showAtlas = false;
   showScreen(null);
   hud.show(true);
   phase = 'playing';
@@ -444,12 +528,25 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   if (won) sound.win();
   else sound.lose();
   hud.toast(won ? 'You win!' : `${nameOf(winner)} wins!`, true);
+  if (won && game.map.id === LEVEL_MAPS[LEVEL_MAPS.length - 1].id) window.setTimeout(() => hud.toast('Champion of every island!', true), 900);
 
   const st = store.stats;
   const peakPct = (id: number) => (game.players[id].stats.peakLand / game.totalCells) * 100;
   st.games++;
   if (won) st.wins++;
   st.recent = (st.recent + (won ? 'W' : 'L')).slice(-6);
+  // Island progress: winning an island opens the next one, and the map rides you there.
+  const lvl = LEVEL_MAPS.findIndex((m) => m.id === game.map.id);
+  let unlockedNew = false;
+  if (won && lvl >= 0) {
+    if (lvl === st.unlocked - 1 && st.unlocked < LEVEL_MAPS.length) {
+      st.unlocked++;
+      unlockedNew = true;
+    }
+    if (lvl === LEVEL_MAPS.length - 1) st.champion = true;
+    if (lvl + 1 < LEVEL_MAPS.length) pendingTravel = { from: lvl, to: lvl + 1 };
+  }
+  nextIsland = pendingTravel !== null;
   if (human !== null) st.bestLandPct = Math.max(st.bestLandPct, Math.round(peakPct(human)));
   store.save();
 
@@ -457,6 +554,7 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   $('resultTitle').textContent = won ? 'You win!' : winner >= 0 ? `${game.players[winner].name} wins!` : 'Game over';
   $('resultReason').textContent =
     reason === 'captured' ? 'Your nest was captured' : reason === 'last' ? 'Last nest standing' : 'Most land when time ran out';
+  if (unlockedNew) $('resultReason').textContent += ` · ${LEVEL_MAPS[lvl + 1].name} unlocked!`;
   const order = game.ranking();
   const big = $('resultBig');
   if (human !== null) {
@@ -584,7 +682,7 @@ document.querySelectorAll<HTMLInputElement>('[data-s]').forEach((el) => {
   };
 });
 $('resetStats').onclick = () => {
-  store.stats = { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '' };
+  store.stats = { ...store.stats, games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '' };
   store.save();
   updateStatsLine();
   sound.click();
@@ -609,11 +707,11 @@ const againBtn = $<HTMLButtonElement>('againBtn');
 againBtn.onclick = () => {
   replayLeft = -1;
   sound.click();
-  startMatch();
+  if (nextIsland) startAttract();
+  else startMatch();
 };
 $('menuBtn').onclick = () => {
   replayLeft = -1;
-  againBtn.textContent = 'Play again';
   sound.click();
   startAttract();
 };
@@ -703,7 +801,7 @@ function loop(now: number): void {
       heartbeatTimer = 0.95 - world.danger * 0.45;
     }
   }
-  if (phase === 'playing' || phase === 'menu' || phase === 'over') {
+  if (phase === 'playing' || phase === 'over') {
     const step = 1 / CONFIG.tickRate;
     accumulator += dt;
     let guard = 0;
@@ -716,7 +814,6 @@ function loop(now: number): void {
         handleEvents(ev);
       }
     }
-    if (phase === 'menu' && game.over) newGame(null);
   }
 
   // Quick replay: the next match starts by itself unless the player heads to the menu.
@@ -726,11 +823,12 @@ function loop(now: number): void {
     const n = Math.ceil(replayLeft);
     if (n !== before || !againBtn.dataset.count) {
       againBtn.dataset.count = String(n);
-      againBtn.textContent = `Play again (${Math.max(0, n)})`;
+      againBtn.textContent = `${nextIsland ? 'Next island' : 'Try again'} (${Math.max(0, n)})`;
     }
     if (replayLeft <= 0) {
       replayLeft = -1;
-      startMatch();
+      if (nextIsland) startAttract();
+      else startMatch();
     }
   }
   if (phase === 'over') {
@@ -739,7 +837,7 @@ function loop(now: number): void {
       showScreen('results');
       hud.show(false);
       replayLeft = 5;
-      againBtn.textContent = 'Play again (5)';
+      againBtn.textContent = `${nextIsland ? 'Next island' : 'Try again'} (5)`;
     }
   }
 
@@ -766,6 +864,10 @@ if (location.search.includes('debug')) {
       return phase;
     },
     world,
+    travel(from: number, to: number) {
+      pendingTravel = { from, to };
+      startAttract();
+    },
     fastForward(seconds: number) {
       for (let i = 0; i < seconds * CONFIG.tickRate && !game.over; i++) {
         game.tick(1 / CONFIG.tickRate);
@@ -779,7 +881,7 @@ if (location.search.includes('debug')) {
 
 buildLogo();
 buildColorPicker();
-buildMapPicker();
+setupMapTouch();
 syncSettingsUI();
 // Load the 3D art, then start. If it fails (e.g. offline web build), the game still runs with simple shapes.
 const playBtn = $<HTMLButtonElement>('playBtn');

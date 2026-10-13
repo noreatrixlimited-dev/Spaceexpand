@@ -11,7 +11,7 @@ const DT = 1 / CONFIG.tickRate;
 const U = UNIT;
 
 function newGame(over: Partial<MatchOptions> = {}) {
-  return new Game({ map: 'candy', startMode: 'patch', hardMode: false, humanSlot: 0, difficulty: 'normal', seed: 1, ...over });
+  return new Game({ map: 'classic', startMode: 'patch', hardMode: false, humanSlot: 0, difficulty: 'normal', seed: 1, ...over });
 }
 
 /** Move a player exactly one cell in direction d (straight line from the cell centre). */
