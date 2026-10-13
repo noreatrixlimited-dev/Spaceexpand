@@ -23,9 +23,9 @@ const PARAMS: Record<Difficulty, BotParams> = {
   hard: { reaction: 1, caution: 2, attackRange: 11, coreAggro: 0.5, coreRange: 18, loopMin: 4, loopMax: 9, starRange: 16, throwTrail: 0.25, throwPlayer: 0.07 },
 };
 
-type Mode = 'idle' | 'expand' | 'flee' | 'attack' | 'raid' | 'carry' | 'star' | 'ghost';
+type Mode = 'idle' | 'expand' | 'flee' | 'attack' | 'raid' | 'carry' | 'star';
 
-/** State-machine bots: Expand / Flee / Attack (trails) / Raid (nests) / Carry / Star / Ghost. */
+/** State-machine bots: Expand / Flee / Attack (trails) / Raid (nests) / Carry / Star. */
 export class Bots {
   private readonly game: Game;
   private paramsOf: BotParams[] = [];
@@ -109,11 +109,7 @@ export class Bots {
     }
     this.lastThink[p.id] = game.time;
 
-    if (p.status === 'shade') {
-      if (!p.plan.length || rng.chance(0.1)) this.planGhost(p);
-      this.follow(p);
-      return;
-    }
+    if (p.status === 'out') return; // captured: gone for good
 
     if (p.carrying >= 0) {
       if (this.mode[p.id] !== 'carry' || !p.plan.length) {
@@ -176,7 +172,7 @@ export class Bots {
     let best = 999;
     for (const e of this.game.players) {
       if (e === p) continue;
-      const hostile = (e.status === 'alive' && !this.isAlly(p, e.id)) || (e.status === 'shade' && e.shadeOf !== p.id);
+      const hostile = e.status === 'alive' && !this.isAlly(p, e.id);
       if (!hostile) continue;
       const ei = g.idx(e.x, e.y);
       for (const t of p.trail) best = Math.min(best, manhattan(g, ei, t));
@@ -343,27 +339,6 @@ export class Bots {
     }
     p.plan = [...best.path, ...seq, ...back];
     this.mode[p.id] = 'expand';
-  }
-
-  private planGhost(p: Player): void {
-    const g = this.game.grid;
-    const rng = this.game.rng;
-    const trail = bfs(
-      g,
-      g.idx(p.x, p.y),
-      (i) => g.trail[i] >= 0 && g.trail[i] !== p.shadeOf && g.trail[i] !== p.id,
-      () => true,
-      20 * UNIT,
-    );
-    if (trail) {
-      p.plan = trail;
-    } else {
-      // Captured riders never come back; they drift around looking for trails to cut.
-      const tx = rng.int(4 * UNIT, g.size - 4 * UNIT);
-      const ty = rng.int(4 * UNIT, g.size - 4 * UNIT);
-      p.plan = bfs(g, g.idx(p.x, p.y), (i) => i === g.idx(tx, ty), () => true) ?? [];
-    }
-    this.mode[p.id] = 'ghost';
   }
 
   private follow(p: Player): void {

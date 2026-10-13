@@ -45,7 +45,7 @@ export class BallsView {
     // Ammo: small balls circling each character's waist.
     for (const p of game.players) {
       const m = this.ammo[p.id];
-      const n = p.status === 'shade' || p.status === 'bonked' ? 0 : p.balls;
+      const n = p.status === 'out' || p.status === 'bonked' ? 0 : p.balls;
       m.count = n;
       const c = avatarPos[p.id];
       for (let k = 0; k < n; k++) {

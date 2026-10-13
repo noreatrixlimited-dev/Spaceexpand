@@ -85,7 +85,7 @@ export class Hud {
         (row.querySelector('.rank') as HTMLElement).textContent = `${rank + 1}`;
         (row.querySelector('.pct') as HTMLElement).textContent = `${pct.toFixed(1)}%`;
         (row.querySelector('.fill') as HTMLElement).style.width = `${Math.max(6, (pct / top) * 100)}%`;
-        const tag = core.state === 'captured' ? 'ghost' : core.state === 'carried' ? 'egg stolen' : '';
+        const tag = core.state === 'captured' ? 'out' : core.state === 'carried' ? 'egg stolen' : '';
         const tagEl = row.querySelector('.tag') as HTMLElement;
         if (tagEl.textContent !== tag) tagEl.textContent = tag;
         row.classList.toggle('out', core.state === 'captured');
@@ -116,7 +116,7 @@ export class Hud {
             : [0, 1, 2].map((i) => `<span class="heart${i < core.hearts ? '' : ' off'}"></span>`).join('');
     }
 
-    const ammo = p.status === 'shade' ? 0 : p.balls;
+    const ammo = p.status === 'out' ? 0 : p.balls;
     if (this.ammo.textContent !== String(ammo)) this.ammo.textContent = String(ammo);
     const cap = `/${game.ballCap(human)}`;
     if (this.ammoCap.textContent !== cap) this.ammoCap.textContent = cap;

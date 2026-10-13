@@ -35,7 +35,7 @@ Combo pop-ups celebrate big moments: Double grab!, Huge grab!, Revenge!, Trail h
 - **Careful:** anyone touching your trail bonks you, and your egg loses a heart.
 - **Steal:** touch enemy eggs to pop their hearts. At 0 hearts, grab the egg; the moment you touch any land in your own colour, the nest is captured. Bump a rider carrying an egg to send it back.
 - **Survive:** after 1:00 the clouds eat the rounded island from its edge inward. Grab the centre star for a speed boost, a bubble shield or a freeze on the clouds.
-- **Captured?** Once a nest is captured it never comes back: that player is out (bots drift on as ghosts that can cut their capturer's rivals' trails). If it's your nest, the match ends for you and goes to results.
+- **Captured?** Once a nest is captured it never comes back: that rider vanishes from the island for the rest of the match. If it's your nest, the match ends for you and goes to results.
 - **Win:** be the last nest standing, or own the most land when the 3-minute timer ends.
 - **No difficulty menu:** the bots adapt on their own. Your first match and matches after losses are gentle (the bots go easy and mostly leave you alone). After two wins in a row the bots sharpen up and gang up on you. During every match they ease off or push harder depending on how you're doing.
 

@@ -13,7 +13,6 @@ export const CONFIG = {
   turnRate: 8, // radians per second when carving toward the stick direction
   glideRamp: 0.35, // seconds to reach full board speed from a stop
   carveSlow: 0.15, // speed lost in the hardest turn
-  shadeSpeedMul: 1.25,
   carrySpeedMul: 0.7,
   boostSpeedMul: 1.5,
 

@@ -301,6 +301,10 @@ A stolen egg is captured as soon as the thief touches any land in their own colo
 
 Removed from the screen: the home arrow, the thief arrow with its "Thief!" label, and the floating "+%" over the robot. The leaderboard and your own % stay.
 
+## 12f. Update: no ghosts
+
+Captured riders vanish in a puff and are gone for the rest of the match. They no longer roam, cut trails or collide with anyone.
+
 ## 13. Status
 
 **Phase 1 (M0–M7) is done** and ships as an Android APK built by GitHub Actions (`.github/workflows/android.yml`).

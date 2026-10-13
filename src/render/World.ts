@@ -247,6 +247,9 @@ export class World {
           this.particles.puff(this.avatarPos[e.carrier].clone().setY(0.8), 10);
           break;
         case 'coreCaptured': {
+          // The captured rider vanishes in a puff.
+          this.particles.puff(this.avatarPos[e.owner].clone().setY(0.6), 14);
+          this.particles.burst(this.avatarPos[e.owner].clone().setY(0.6), PLAYER_COLORS[e.owner], 20, 4);
           const c = game.cores[e.by];
           this.territory.wave(e.cells, c.x, c.y, 0.006);
           this.particles.confetti(this.nestPos[e.by].clone().setY(1), 70);
@@ -312,14 +315,15 @@ export class World {
         if (cur.distanceTo(target) > 3) cur.copy(target);
         else cur.lerp(target, 1 - Math.exp(-dt * 30));
         b.root.position.copy(cur);
+        b.root.visible = p.status !== 'out';
         b.setFacing(Math.cos(p.heading), Math.sin(p.heading));
         const stunned = p.stunTimer > 0;
         b.moving = p.moving && p.status !== 'bonked' && !stunned;
         b.mood =
-          p.status === 'shade' ? 'ghost' : p.status === 'bonked' || stunned ? 'bonked' : game.over && game.winner === p.id ? 'happy' : 'normal';
+          p.status === 'out' ? 'ghost' : p.status === 'bonked' || stunned ? 'bonked' : game.over && game.winner === p.id ? 'happy' : 'normal';
         b.ghostColor = p.shadeOf >= 0 ? PLAYER_COLORS[p.shadeOf] : null;
         b.carrying = p.carrying >= 0;
-        b.crowned = leader === p.id && p.status !== 'shade';
+        b.crowned = leader === p.id && p.status !== 'out';
         b.shielded = p.shield;
         // Lean from how fast the heading is actually changing (works for bots and players).
         let dh = p.heading - this.lastHeading[p.id];
@@ -413,7 +417,7 @@ export class World {
       want = Math.min(1, p.trail.length / (14 * U)) * 0.8;
       let near = Infinity;
       for (const q of game.players) {
-        if (q === p || q.status === 'bonked' || (q.status === 'shade' && q.shadeOf === p.id)) continue;
+        if (q === p || q.status !== 'alive') continue;
         for (let k = 0; k < p.trail.length; k += 3) {
           const c = p.trail[k];
           near = Math.min(near, Math.hypot((c % game.grid.size) - q.px, Math.floor(c / game.grid.size) - q.py));

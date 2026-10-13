@@ -164,7 +164,7 @@ describe('nests', () => {
     place(g, 1, home.x, home.y - Math.ceil(CONFIG.nestReach) - 1);
     walk(g, 1, DOWN, 2);
     expect(core.state).toBe('captured');
-    expect(g.players[0].status).toBe('shade');
+    expect(g.players[0].status).toBe('out');
     expect(g.land[0]).toBe(0);
   });
   it('a stolen egg is captured the moment the thief touches any land in their colour', () => {
@@ -177,7 +177,7 @@ describe('nests', () => {
     place(g, 1, m, m);
     walk(g, 1, RIGHT, 3);
     expect(g.cores[0].state).toBe('captured');
-    expect(g.players[0].status).toBe('shade');
+    expect(g.players[0].status).toBe('out');
   });
   it('bumping into a carrier sends the egg home with one heart', () => {
     const g = newGame();
@@ -226,12 +226,12 @@ describe('ghosts', () => {
     const g = newGame();
     const p = g.players[0];
     g.cores[0].state = 'captured';
-    p.status = 'shade';
+    p.status = 'out';
     p.shadeOf = 1;
     const target = g.cores[3];
     place(g, 0, target.x, target.y + Math.ceil(CONFIG.nestReach) + 2);
     walk(g, 0, UP, 3);
-    expect(p.status).toBe('shade');
+    expect(p.status).toBe('out');
     expect(g.cores[0].state).toBe('captured');
   });
 });

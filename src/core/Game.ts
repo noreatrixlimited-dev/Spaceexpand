@@ -4,7 +4,7 @@ import { computeCapture } from './capture';
 import { Grid, type Dir } from './Grid';
 import { Rng } from './rng';
 
-export type PlayerStatus = 'alive' | 'bonked' | 'shade';
+export type PlayerStatus = 'alive' | 'bonked' | 'out';
 export type PowerType = 'speed' | 'shield' | 'freeze';
 
 export interface Player {
@@ -33,7 +33,7 @@ export interface Player {
   bonkTimer: number;
   trail: number[];
   carrying: number; // id of the core being carried, -1 if none
-  shadeOf: number; // capturer id while a ghost
+  shadeOf: number; // who captured this player's nest (-1 if still in the game)
   power: PowerType | null;
   powerTimer: number;
   shield: boolean;
@@ -253,7 +253,6 @@ export class Game {
 
   speedOf(p: Player): number {
     let s = CONFIG.baseSpeed * p.speedMul;
-    if (p.status === 'shade') s *= CONFIG.shadeSpeedMul;
     if (p.carrying >= 0) s *= CONFIG.carrySpeedMul;
     if (p.power === 'speed') s *= CONFIG.boostSpeedMul;
     return s;
@@ -273,6 +272,8 @@ export class Game {
       if (p.bonkTimer <= 0) this.respawn(p);
       return;
     }
+    // Captured riders are gone from the island for the rest of the match.
+    if (p.status === 'out') return;
     if (p.stunTimer > 0) {
       p.stunTimer -= dt;
       p.glide = 0;
@@ -301,7 +302,7 @@ export class Game {
       const step = Math.min(0.25, dist);
       dist -= step;
       if (!this.moveBy(p, Math.cos(p.heading) * step, Math.sin(p.heading) * step, true)) break;
-      if (p.status !== 'alive' && p.status !== 'shade') break;
+      if (p.status !== 'alive') break;
     }
   }
 
@@ -348,12 +349,7 @@ export class Game {
     const g = this.grid;
     const cell = g.idx(p.x, p.y);
 
-    if (p.status === 'shade') {
-      const t = g.trail[cell];
-      // Ghosts are out for good: they can only haunt their capturer's rivals.
-      if (t >= 0 && t !== p.id && t !== p.shadeOf) this.bonk(t, p.id);
-      return;
-    }
+    if (p.status === 'out') return;
 
     const t = g.trail[cell];
     if (t >= 0 && t !== p.id) this.bonk(t, p.id);
@@ -392,16 +388,16 @@ export class Game {
     const ps = this.players;
     for (let i = 0; i < ps.length; i++) {
       const p = ps[i];
-      if (p.status === 'bonked') continue;
+      if (p.status === 'bonked' || p.status === 'out') continue;
       for (let j = i + 1; j < ps.length; j++) {
         const q = ps[j];
-        if (q.status === 'bonked' || Math.hypot(p.px - q.px, p.py - q.py) > CONFIG.bumpDistance) continue;
+        if (q.status === 'bonked' || q.status === 'out' || Math.hypot(p.px - q.px, p.py - q.py) > CONFIG.bumpDistance) continue;
         // Bumping into an egg carrier knocks the egg back to its nest.
         for (const [a, b] of [
           [p, q],
           [q, p],
         ]) {
-          if (b.carrying >= 0 && b.status !== 'shade' && a.status !== 'shade' && !this.isAlly(a.id, b.id)) this.dropEgg(b, a.id);
+          if (b.carrying >= 0 && b.status !== 'out' && a.status !== 'out' && !this.isAlly(a.id, b.id)) this.dropEgg(b, a.id);
         }
       }
       if (p.status !== 'alive') continue;
@@ -535,7 +531,9 @@ export class Game {
     c.hearts = 0;
     if (v.carrying >= 0) this.dropEgg(v, p.id);
     this.clearTrail(v);
-    v.status = 'shade';
+    v.status = 'out';
+    v.moving = false;
+    v.aim = null;
     v.shadeOf = p.id;
     v.power = null;
     v.shield = false;
@@ -550,7 +548,7 @@ export class Game {
         cells.push(i);
       }
     }
-    for (const q of this.players) if (q.status === 'shade' && q.shadeOf === victimId) q.shadeOf = p.id;
+    for (const q of this.players) if (q.status === 'out' && q.shadeOf === victimId) q.shadeOf = p.id;
     p.stats.captures++;
     this.events.push({ type: 'coreCaptured', owner: victimId, by: p.id, cells });
   }
@@ -579,11 +577,11 @@ export class Game {
   private updateBalls(dt: number): void {
     let smallest = -1;
     for (const p of this.players) {
-      if (p.status === 'shade') continue;
+      if (p.status === 'out') continue;
       if (smallest < 0 || this.land[p.id] < this.land[smallest]) smallest = p.id;
     }
     for (const p of this.players) {
-      if (p.status === 'shade') continue;
+      if (p.status === 'out') continue;
       const cap = this.ballCap(p.id);
       if (p.balls >= cap) {
         p.ballTimer = 0;
@@ -713,7 +711,7 @@ export class Game {
             hit = true;
           }
           if (guard.has(i) || g.owner[i] === pr.owner) continue;
-          if (thrower.status === 'shade') continue;
+          if (thrower.status === 'out') continue;
           g.owner[i] = pr.owner;
           cells.push(i);
         }
@@ -861,19 +859,9 @@ export class Game {
         this.events.push({ type: 'coreSlide', owner: c.owner });
       }
     }
-    const mid = (g.size - 1) / 2;
     for (const p of this.players) {
       if (g.walkable(p.x, p.y)) continue;
       if (p.status === 'alive') this.bonk(p.id, p.id);
-      if (p.status === 'shade') {
-        let guard = 0;
-        let { x, y } = p;
-        while (!g.walkable(x, y) && guard++ < g.size) {
-          x += Math.sign(mid - x);
-          y += Math.sign(mid - y);
-        }
-        this.placeAt(p, x, y);
-      }
     }
   }
 
