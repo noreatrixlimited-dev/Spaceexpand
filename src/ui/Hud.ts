@@ -116,7 +116,7 @@ export class Hud {
       this.meHearts.dataset.k = key;
       this.meHearts.innerHTML =
         core.state === 'captured'
-          ? '<span class="status">ghost: touch a nest!</span>'
+          ? '<span class="status">nest captured: you are out</span>'
           : core.state === 'carried'
             ? '<span class="status">your egg was stolen!</span>'
             : [0, 1, 2].map((i) => `<span class="heart${i < core.hearts ? '' : ' off'}"></span>`).join('');

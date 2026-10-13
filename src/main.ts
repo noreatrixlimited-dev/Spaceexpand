@@ -33,7 +33,8 @@ let game: Game;
 let director: Director | null = null;
 let combo = { lastCapture: -99, bonkedBy: -1, bonkedAt: -99, cuts: 0 };
 let heartbeatTimer = 0;
-let replayLeft = -1; // seconds until the next match starts by itself on the results screen
+let replayLeft = -1;
+let eliminatedAt = -1; // when the player's nest fell (the match then ends for them) // seconds until the next match starts by itself on the results screen
 let phase: Phase = 'menu';
 let human: number | null = null;
 let accumulator = 0;
@@ -156,6 +157,7 @@ function newGame(humanSlot: number | null, tutorial = false): void {
     if (humanSlot !== null) director = new Director(game, bots, humanSlot, pickMood(store.stats.recent));
   }
   combo = { lastCapture: -99, bonkedBy: -1, bonkedAt: -99, cuts: 0 };
+  eliminatedAt = -1;
   if (!tutorial) {
     tutorialStep = -1;
     coach.classList.add('hidden');
@@ -378,12 +380,9 @@ function handleEvents(events: GameEvent[]): void {
           world.kickCamera(1);
         } else if (e.owner === me) {
           vibrate(300);
-          hud.toast("You're a ghost! Touch another nest to break free", true);
+          hud.toast('Your nest was captured!', true);
+          eliminatedAt = performance.now();
         } else hud.toast(`${nameOf(e.by)} captured ${nameOf(e.owner)}!`);
-        break;
-      case 'freed':
-        sound.bigCapture();
-        hud.toast(e.pid === me ? 'You broke free!' : `${nameOf(e.pid)} broke free!`, e.pid === me);
         break;
       case 'voidRing':
         sound.rumble();
@@ -419,7 +418,7 @@ function handleEvents(events: GameEvent[]): void {
         }
         break;
       case 'gameOver':
-        onGameOver(e.winner, e.reason);
+        if (phase !== 'over') onGameOver(e.winner, e.reason);
         break;
       default:
         break;
@@ -427,7 +426,8 @@ function handleEvents(events: GameEvent[]): void {
   }
 }
 
-function onGameOver(winner: number, reason: 'last' | 'time'): void {
+function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void {
+  eliminatedAt = -1;
   phase = 'over';
   overTimer = 2.4;
   input.enabled = false;
@@ -447,7 +447,8 @@ function onGameOver(winner: number, reason: 'last' | 'time'): void {
 
   // results card
   $('resultTitle').textContent = won ? 'You win!' : winner >= 0 ? `${game.players[winner].name} wins!` : 'Game over';
-  $('resultReason').textContent = reason === 'last' ? 'Last nest standing' : 'Most land when time ran out';
+  $('resultReason').textContent =
+    reason === 'captured' ? 'Your nest was captured' : reason === 'last' ? 'Last nest standing' : 'Most land when time ran out';
   const order = game.ranking();
   const big = $('resultBig');
   if (human !== null) {
@@ -667,6 +668,10 @@ function loop(now: number): void {
     if (countdownLeft <= 0.2) phase = 'playing';
   }
 
+  // Once your nest is captured you're out: go to results after a short beat.
+  if (phase === 'playing' && eliminatedAt > 0 && performance.now() - eliminatedAt > 2500) {
+    onGameOver(game.leader(), 'captured');
+  }
   if (phase === 'playing') {
     director?.update(dt);
     tutorialTick(dt);

@@ -94,7 +94,6 @@ export type GameEvent =
   | { type: 'coreStolen'; owner: number; by: number }
   | { type: 'eggDropped'; owner: number; carrier: number; by: number }
   | { type: 'coreCaptured'; owner: number; by: number; cells: number[] }
-  | { type: 'freed'; pid: number }
   | { type: 'heartRegen'; owner: number; hearts: number }
   | { type: 'voidRing'; ring: number; cells: number[] }
   | { type: 'coreSlide'; owner: number }
@@ -351,13 +350,8 @@ export class Game {
 
     if (p.status === 'shade') {
       const t = g.trail[cell];
+      // Ghosts are out for good: they can only haunt their capturer's rivals.
       if (t >= 0 && t !== p.id && t !== p.shadeOf) this.bonk(t, p.id);
-      for (const c of this.cores) {
-        if (c.state === 'nest' && c.owner !== p.shadeOf && c.owner !== p.id && this.near(c, p.x, p.y)) {
-          this.breakFree(p);
-          return;
-        }
-      }
       return;
     }
 
@@ -554,33 +548,6 @@ export class Game {
     for (const q of this.players) if (q.status === 'shade' && q.shadeOf === victimId) q.shadeOf = p.id;
     p.stats.captures++;
     this.events.push({ type: 'coreCaptured', owner: victimId, by: p.id, cells });
-  }
-
-  private breakFree(p: Player): void {
-    const g = this.grid;
-    const c = this.cores[p.id];
-    c.state = 'nest';
-    c.hearts = 1;
-    c.invuln = CONFIG.coreHitInvuln;
-    c.regenTimer = 0;
-    c.x = c.homeX;
-    c.y = c.homeY;
-    this.slideCoreInward(c);
-    const others = this.protectedCells(p.id);
-    const r = Math.ceil(CONFIG.freePatchRadius);
-    for (let y = c.y - r; y <= c.y + r; y++) {
-      for (let x = c.x - r; x <= c.x + r; x++) {
-        if (!g.walkable(x, y) || Math.hypot(x - c.x, y - c.y) > CONFIG.freePatchRadius) continue;
-        const i = g.idx(x, y);
-        if (!others.has(i)) g.owner[i] = p.id;
-      }
-    }
-    p.status = 'alive';
-    p.shadeOf = -1;
-    p.plan = [];
-    p.balls = CONFIG.ballStart;
-    this.placeAt(p, c.x, c.y);
-    this.events.push({ type: 'freed', pid: p.id });
   }
 
   private grantPower(p: Player): void {

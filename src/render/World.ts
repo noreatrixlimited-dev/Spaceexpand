@@ -272,9 +272,6 @@ export class World {
           this.addShake(0.4);
           break;
         }
-        case 'freed':
-          this.particles.confetti(this.avatarPos[e.pid].clone().setY(1), 40);
-          break;
         case 'voidRing':
           this.territory.voidWave(e.cells);
           this.addShake(0.2);

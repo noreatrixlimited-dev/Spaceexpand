@@ -291,6 +291,10 @@ Before committing to a name, check the Play Store and App Store, web domains and
 - **Interface:** a live, sliding leaderboard with colour bars; your big % with nest hearts; a small timer and event feed; the throw button; a map picker on the title screen; results showing your rank and %.
 - **Bots:** they draw curved petal-shaped loops, and their path planning runs about 10 times a second.
 
+## 12d. Update: captured nests stay captured
+
+Ghosts can no longer break free. Once a nest is captured, that player is out for the rest of the match. Captured bots drift as ghosts that can cut the trails of their capturer's rivals. A captured human goes straight to the results screen after a short beat.
+
 ## 13. Status
 
 **Phase 1 (M0–M7) is done** and ships as an Android APK built by GitHub Actions (`.github/workflows/android.yml`).

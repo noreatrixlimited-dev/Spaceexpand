@@ -27,7 +27,6 @@ export const CONFIG = {
   coreHitInvuln: 3,
   heartRegenSeconds: 30,
   bonkSeconds: 1.5,
-  freePatchRadius: 1.2 * UNIT,
   threatDistance: 5 * UNIT,
 
   voidStart: 60,

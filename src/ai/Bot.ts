@@ -353,26 +353,15 @@ export class Bots {
       g.idx(p.x, p.y),
       (i) => g.trail[i] >= 0 && g.trail[i] !== p.shadeOf && g.trail[i] !== p.id,
       () => true,
-      12 * UNIT,
+      20 * UNIT,
     );
     if (trail) {
       p.plan = trail;
     } else {
-      // Head for the nearest nest that isn't the capturer's to break free.
-      const nests = this.game.cores.filter((c) => c.state === 'nest' && c.owner !== p.shadeOf && c.owner !== p.id);
-      const targets = new Set(nests.map((c) => g.idx(c.x, c.y)));
-      const route = nests.length
-        ? bfs(g, g.idx(p.x, p.y), (i) => {
-            for (const t of targets) if (manhattan(g, i, t) <= CONFIG.nestReach - 1) return true;
-            return false;
-          }, () => true)
-        : null;
-      if (route && rng.chance(0.8)) p.plan = route;
-      else {
-        const tx = rng.int(4 * UNIT, g.size - 4 * UNIT);
-        const ty = rng.int(4 * UNIT, g.size - 4 * UNIT);
-        p.plan = bfs(g, g.idx(p.x, p.y), (i) => i === g.idx(tx, ty), () => true) ?? [];
-      }
+      // Captured riders never come back; they drift around looking for trails to cut.
+      const tx = rng.int(4 * UNIT, g.size - 4 * UNIT);
+      const ty = rng.int(4 * UNIT, g.size - 4 * UNIT);
+      p.plan = bfs(g, g.idx(p.x, p.y), (i) => i === g.idx(tx, ty), () => true) ?? [];
     }
     this.mode[p.id] = 'ghost';
   }

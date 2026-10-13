@@ -210,7 +210,7 @@ describe('the void', () => {
 });
 
 describe('ghosts', () => {
-  it('a ghost touching a third player nest breaks free', () => {
+  it('a captured player stays out for good, even touching another nest', () => {
     const g = newGame();
     const p = g.players[0];
     g.cores[0].state = 'captured';
@@ -219,8 +219,8 @@ describe('ghosts', () => {
     const target = g.cores[3];
     place(g, 0, target.x, target.y + Math.ceil(CONFIG.nestReach) + 2);
     walk(g, 0, UP, 3);
-    expect(p.status).toBe('alive');
-    expect(g.cores[0].state).toBe('nest');
+    expect(p.status).toBe('shade');
+    expect(g.cores[0].state).toBe('captured');
   });
 });
 
