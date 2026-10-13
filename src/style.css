@@ -1175,3 +1175,91 @@ h2 {
   margin-top: 10px;
   animation: pop-in 0.25s ease;
 }
+
+/* ---------- quality polish ---------- */
+button:active {
+  transform: scale(0.96);
+}
+#loading {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: linear-gradient(180deg, #eef3fb, #dfe8f5);
+  transition: opacity 0.45s ease;
+}
+#loading.done {
+  opacity: 0;
+  pointer-events: none;
+}
+.loading-logo {
+  font-size: 44px;
+  font-weight: 700;
+  color: #9b5de5;
+  -webkit-text-stroke: 2px #fff;
+  text-shadow: 0 4px 0 rgba(74, 54, 84, 0.15);
+}
+.loading-dots {
+  display: flex;
+  gap: 10px;
+}
+.loading-dots i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #9b5de5;
+  animation: dot 0.9s ease-in-out infinite;
+}
+.loading-dots i:nth-child(2) {
+  background: #f25454;
+  animation-delay: 0.15s;
+}
+.loading-dots i:nth-child(3) {
+  background: #3d9df2;
+  animation-delay: 0.3s;
+}
+@keyframes dot {
+  50% {
+    transform: translateY(-10px);
+  }
+}
+/* leaderboard leader */
+.lb-row.top .fill {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+.lb-row .rank svg {
+  display: block;
+  margin-left: -2px;
+}
+/* throw cooldown sweep */
+#throwBtn {
+  --cd: 0;
+}
+#throwBtn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(rgba(60, 40, 80, 0.35) calc(var(--cd) * 360deg), transparent 0);
+  pointer-events: none;
+}
+/* results medals */
+.rank-row.medal-1 {
+  background: linear-gradient(90deg, #fff4c2, #fff);
+}
+.rank-row.medal-2 {
+  background: linear-gradient(90deg, #eef1f6, #fff);
+}
+.rank-row.medal-3 {
+  background: linear-gradient(90deg, #ffe4cf, #fff);
+}
+.card.won {
+  box-shadow: 0 0 0 4px #ffd43b, 0 16px 40px rgba(60, 70, 110, 0.18);
+}
+.card.won h2 {
+  animation: bob 1.4s ease-in-out infinite;
+}

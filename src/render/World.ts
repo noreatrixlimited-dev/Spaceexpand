@@ -13,6 +13,7 @@ import { starGeometry } from './shapes';
 import { Territory } from './Territory';
 
 type Avatar = Blob | Critter;
+const SWOOP_TIME = 2.6;
 export type Quality = 'high' | 'low';
 export type CameraMode = 'follow' | 'overview' | 'orbit';
 
@@ -51,6 +52,8 @@ export class World {
   /** 0..1: how risky the human's trail is right now (drives the red pulse and heartbeat). */
   danger = 0;
   private punch = 0;
+  private autoZoom = 1;
+  private swoop = 0;
   mode: CameraMode = 'orbit';
   followId = 0;
   zoom = 1;
@@ -93,7 +96,9 @@ export class World {
   }
 
   private pixelRatio(): number {
-    return Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : 1.25);
+    // Phones have very dense screens; past ~1.6x the extra pixels cost a lot and add little.
+    const mobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+    return Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? (mobile ? 1.6 : 2) : 1.2);
   }
 
   /** Soft outlines on characters and the island edge + a light grade. No blur, bloom or fog. */
@@ -208,6 +213,9 @@ export class World {
     const n = game.grid.size;
     for (const e of events) {
       switch (e.type) {
+        case 'trail':
+          this.territory.mark([e.cell]);
+          break;
         case 'capture': {
           this.territory.wave(e.cells, e.fromX, e.fromY);
           this.avatars[e.pid].kick(0.3);
@@ -215,6 +223,7 @@ export class World {
           break;
         }
         case 'bonk': {
+          this.territory.mark(e.trail);
           const pos = this.avatarPos[e.victim].clone().setY(0.5);
           this.particles.burst(pos, PLAYER_COLORS[e.victim], 18, 4);
           this.particles.puff(pos, 6);
@@ -387,6 +396,18 @@ export class World {
     else this.renderer.render(this.scene, this.camera);
   }
 
+  /** Start a match with the camera high over the whole island, then swoop down to the rider. */
+  startSwoop(): void {
+    const aspect = this.camera.aspect;
+    const halfH = Math.tan((this.camera.fov * Math.PI) / 360);
+    const span = (this.game ? this.game.map.size : 20) + 2.5;
+    const dist = Math.max(span / (halfH * aspect), span / halfH);
+    this.camTarget.set(0, 0, 0);
+    this.camPos.copy(new THREE.Vector3(0, 1, 0.5).normalize().multiplyScalar(dist));
+    this.swoop = SWOOP_TIME;
+    this.autoZoom = 1;
+  }
+
   /** Small zoom "punch" for satisfying moments (big land grabs). */
   kickCamera(amount: number): void {
     this.punch = Math.max(this.punch, amount);
@@ -449,21 +470,31 @@ export class World {
       if (p.moving) desired.add(new THREE.Vector3(Math.cos(p.heading), 0, Math.sin(p.heading)).multiplyScalar(1.6));
       const across = aspect < 1 ? 13 / 2 / halfW : 16 / 2 / halfH;
       this.punch = Math.max(0, this.punch - dt * 1.5);
-      dist = (Math.max(12, across) / this.zoom) * (1 - this.punch * 0.08);
+      // See more of the island as you grow, and while you're out on a long trail.
+      const grow = Math.min(0.3, (game.percent(p.id) / 100) * 1.1) + Math.min(0.15, p.trail.length / (30 * UNIT));
+      this.autoZoom += (1 + grow - this.autoZoom) * Math.min(1, dt * 1.2);
+      dist = ((Math.max(12, across) * this.autoZoom) / this.zoom) * (1 - this.punch * 0.08);
     } else {
       desired = new THREE.Vector3(0, 0, 0);
       const span = (game ? game.map.size : 20) + 2.5;
       dist = Math.max(span / halfW, span / halfH) * 1.02;
     }
 
-    this.camTarget.lerp(desired, 1 - Math.exp(-dt * (this.mode === 'follow' ? 5 : 2)));
+    // During the intro swoop the camera eases slowly from the whole island down to the rider.
+    let ease = 1;
+    if (this.swoop > 0) {
+      this.swoop = Math.max(0, this.swoop - dt);
+      const t = 1 - this.swoop / SWOOP_TIME;
+      ease = 0.15 + 0.85 * t * t;
+    }
+    this.camTarget.lerp(desired, 1 - Math.exp(-dt * (this.mode === 'follow' ? 5 : 2) * ease));
     let offset = tilt.multiplyScalar(dist);
     if (this.mode === 'orbit') {
       const a = this.time * 0.06;
       offset = new THREE.Vector3(Math.sin(a) * dist * 0.5, dist * 0.86, Math.cos(a) * dist * 0.5);
     }
     const wantPos = this.camTarget.clone().add(offset);
-    this.camPos.lerp(wantPos, 1 - Math.exp(-dt * (this.mode === 'follow' ? 12 : 3)));
+    this.camPos.lerp(wantPos, 1 - Math.exp(-dt * (this.mode === 'follow' ? 12 : 3) * ease));
     this.camera.position.copy(this.camPos);
     if (this.shake > 0) {
       this.shake = Math.max(0, this.shake - dt * 1.8);

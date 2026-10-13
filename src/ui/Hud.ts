@@ -82,7 +82,13 @@ export class Hud {
         const pct = game.percent(id);
         const core = game.cores[id];
         row.style.transform = `translateY(${rank * 100}%)`;
-        (row.querySelector('.rank') as HTMLElement).textContent = `${rank + 1}`;
+        const rankEl = row.querySelector('.rank') as HTMLElement;
+        const rankKey = String(rank);
+        if (rankEl.dataset.r !== rankKey) {
+          rankEl.dataset.r = rankKey;
+          rankEl.innerHTML = rank === 0 ? '<svg viewBox="0 0 24 18" width="15" height="12"><path d="M2 16h20l1-11-6 4-5-8-5 8-6-4z" fill="#ffd43b" stroke="#b07a00" stroke-width="1.5" stroke-linejoin="round"/></svg>' : `${rank + 1}`;
+        }
+        row.classList.toggle('top', rank === 0);
         (row.querySelector('.pct') as HTMLElement).textContent = `${pct.toFixed(1)}%`;
         (row.querySelector('.fill') as HTMLElement).style.width = `${Math.max(6, (pct / top) * 100)}%`;
         const tag = core.state === 'captured' ? 'out' : core.state === 'carried' ? 'egg stolen' : '';
@@ -116,6 +122,8 @@ export class Hud {
             : [0, 1, 2].map((i) => `<span class="heart${i < core.hearts ? '' : ' off'}"></span>`).join('');
     }
 
+    // Throw button: a sweep shows the short cooldown after each throw.
+    this.throwBtn.style.setProperty('--cd', String(Math.max(0, p.throwCooldown) / CONFIG.throwCooldown));
     const ammo = p.status === 'out' ? 0 : p.balls;
     if (this.ammo.textContent !== String(ammo)) this.ammo.textContent = String(ammo);
     const cap = `/${game.ballCap(human)}`;

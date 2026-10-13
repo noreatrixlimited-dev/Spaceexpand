@@ -20,6 +20,9 @@ export class Territory {
   private readonly landTex: THREE.DataTexture;
   private readonly pendingAt: Float32Array;
   private readonly active = new Set<number>();
+  private readonly trailActive = new Set<number>();
+  private readonly dirty = new Set<number>();
+  private sweep = 0;
   private time = 0;
   private first = true;
   private readonly uniforms: { uDangerId: { value: number }; uDanger: { value: number }; uTime: { value: number } };
@@ -154,11 +157,42 @@ export class Territory {
       const x = i % n;
       const y = (i - x) / n;
       this.pendingAt[i] = this.time + Math.hypot(x - fx, y - fy) * speed;
+      this.dirty.add(i);
     }
   }
 
   voidWave(cells: number[]): void {
-    for (const i of cells) this.pendingAt[i] = this.time + Math.random() * 0.4;
+    for (const i of cells) {
+      this.pendingAt[i] = this.time + Math.random() * 0.4;
+      this.dirty.add(i);
+    }
+  }
+
+  /** Cells that changed in the game (from events): checked on the next update. */
+  mark(cells: Iterable<number>): void {
+    for (const i of cells) this.dirty.add(i);
+  }
+
+  /** Compare one cell's drawn state with the game and queue animation if needed. */
+  private check(game: Game, i: number): void {
+    const g = game.grid;
+    const o = g.voided[i] ? -1 : g.owner[i];
+    const k = i * 4;
+    const own = this.own;
+    if (
+      this.land[k] !== (g.voided[i] ? 0 : 255) ||
+      own[k] !== (o === 0 ? 255 : 0) ||
+      own[k + 1] !== (o === 1 ? 255 : 0) ||
+      own[k + 2] !== (o === 2 ? 255 : 0) ||
+      own[k + 3] !== (o === 3 ? 255 : 0)
+    ) {
+      this.active.add(i);
+    }
+    const t = g.trail[i];
+    const tr = this.trail;
+    if (tr[k] !== (t === 0 ? 255 : 0) || tr[k + 1] !== (t === 1 ? 255 : 0) || tr[k + 2] !== (t === 2 ? 255 : 0) || tr[k + 3] !== (t === 3 ? 255 : 0)) {
+      this.trailActive.add(i);
+    }
   }
 
   update(game: Game, dt: number, onPop?: (cell: number, owner: number) => void): void {
@@ -173,37 +207,43 @@ export class Territory {
     let trailDirty = false;
     let landDirty = false;
 
-    // Find cells whose target differs from what's shown.
-    for (let i = 0; i < N; i++) {
-      const o = g.voided[i] ? -1 : g.owner[i];
-      const k = i * 4;
-      const wantLand = g.voided[i] ? 0 : 255;
-      if (this.first) {
-        land[k] = wantLand;
+    if (this.first) {
+      for (let i = 0; i < N; i++) {
+        const k = i * 4;
+        land[k] = g.voided[i] ? 0 : 255;
+        const o = g.voided[i] ? -1 : g.owner[i];
         if (o >= 0) own[k + o] = 255;
-        continue;
       }
-      if (land[k] !== wantLand || own[k] !== (o === 0 ? 255 : 0) || own[k + 1] !== (o === 1 ? 255 : 0) || own[k + 2] !== (o === 2 ? 255 : 0) || own[k + 3] !== (o === 3 ? 255 : 0)) {
-        this.active.add(i);
+      this.first = false;
+      ownDirty = landDirty = true;
+    } else {
+      // Changed cells reported by events, plus a slow sweep as a safety net.
+      for (const i of this.dirty) this.check(game, i);
+      this.dirty.clear();
+      const chunk = Math.ceil(N / 24);
+      for (let n = 0; n < chunk; n++) {
+        this.check(game, this.sweep);
+        this.sweep = (this.sweep + 1) % N;
       }
-      // trails react instantly-ish
+    }
+
+    // Trails: fade in fast, fade out a little slower.
+    for (const i of this.trailActive) {
+      const k = i * 4;
       const t = g.trail[i];
+      let done = true;
       for (let c = 0; c < 4; c++) {
         const want = t === c ? 255 : 0;
         const cur = trail[k + c];
-        if (cur !== want) {
-          const step = want > cur ? 60 : 25;
-          trail[k + c] = want > cur ? Math.min(want, cur + step) : Math.max(want, cur - step);
-          trailDirty = true;
-        }
+        if (cur === want) continue;
+        trail[k + c] = want > cur ? Math.min(want, cur + Math.ceil(dt * 255 * 14)) : Math.max(want, cur - Math.ceil(dt * 255 * 6));
+        done = false;
+        trailDirty = true;
       }
-    }
-    if (this.first) {
-      this.first = false;
-      ownDirty = landDirty = true;
+      if (done) this.trailActive.delete(i);
     }
 
-    // Animate ownership and land toward their targets (after any wave delay).
+    // Ownership and land ease toward their targets (after any wave delay).
     const rate = Math.ceil(dt * 255 * 7);
     for (const i of this.active) {
       if (this.time < this.pendingAt[i]) continue;

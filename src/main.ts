@@ -34,6 +34,7 @@ let director: Director | null = null;
 let combo = { lastCapture: -99, bonkedBy: -1, bonkedAt: -99, cuts: 0 };
 let heartbeatTimer = 0;
 let replayLeft = -1;
+let smoothDt = 1 / 60;
 let eliminatedAt = -1; // when the player's nest fell (the match then ends for them) // seconds until the next match starts by itself on the results screen
 let phase: Phase = 'menu';
 let human: number | null = null;
@@ -185,6 +186,7 @@ function startMatch(): void {
   sound.unlock();
   sound.startMusic();
   newGame(store.settings.slot);
+  world.startSwoop();
   showScreen(null);
   hud.show(true);
   phase = 'countdown';
@@ -449,7 +451,18 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   const big = $('resultBig');
   if (human !== null) {
     big.style.setProperty('--c', PLAYER_COLORS[human]);
-    big.textContent = `#${order.indexOf(human) + 1} · ${game.percent(human).toFixed(1)}%`;
+    // Count the score up for a little drama.
+    const rank = order.indexOf(human) + 1;
+    const target = game.percent(human);
+    const start = performance.now();
+    const tick = () => {
+      const t = Math.min(1, (performance.now() - start) / 900);
+      const eased = 1 - (1 - t) * (1 - t) * (1 - t);
+      big.textContent = `#${rank} · ${(target * eased).toFixed(1)}%`;
+      if (t < 1 && phase === 'over') requestAnimationFrame(tick);
+    };
+    tick();
+    $('results').querySelector('.card')!.classList.toggle('won', won);
   } else big.textContent = '';
   const places = ['1st', '2nd', '3rd', '4th'];
   $('ranking').innerHTML = game
@@ -458,7 +471,7 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
       const c = game.cores[id];
       const pct = game.percent(id);
       const tag = c.state === 'captured' ? 'captured' : `${pct.toFixed(1)}%`;
-      return `<div class="rank-row${id === human ? ' me' : ''}" style="animation-delay:${0.1 + k * 0.08}s">
+      return `<div class="rank-row${id === human ? ' me' : ''} medal-${k + 1}" style="animation-delay:${0.1 + k * 0.08}s">
         <span class="place">${places[k]}</span>
         <span class="dot" style="background:${PLAYER_COLORS[id]}"></span>
         <span class="name">${id === human ? 'You' : game.players[id].name}</span>
@@ -594,6 +607,10 @@ $('menuBtn').onclick = () => {
 };
 
 window.addEventListener('resize', () => world.resize());
+// Every button gives a tiny haptic tick.
+document.addEventListener('pointerdown', (e) => {
+  if ((e.target as HTMLElement).closest('button')) vibrate(8);
+});
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     pause();
@@ -724,7 +741,9 @@ function loop(now: number): void {
     const riding = me.moving && me.status === 'alive' && me.stunTimer <= 0;
     sound.setRide(riding ? me.glide : 0, Math.min(1, Math.abs(me.turn) / CONFIG.turnRate));
   } else sound.setRide(0, 0);
-  world.frame(dt);
+  // Smooth out frame-time jitter for animation (the simulation still uses real time).
+  smoothDt += (dt - smoothDt) * 0.3;
+  world.frame(smoothDt);
   if (phase !== 'menu') hud.update(game, human, dt);
   requestAnimationFrame(loop);
 }
@@ -764,6 +783,9 @@ loadArt()
   .finally(() => {
     playBtn.disabled = false;
     playBtn.textContent = 'Play';
+    const loading = $('loading');
+    loading.classList.add('done');
+    window.setTimeout(() => loading.remove(), 500);
     startAttract();
     requestAnimationFrame(loop);
   });
