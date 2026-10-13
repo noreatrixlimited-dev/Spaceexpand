@@ -161,7 +161,6 @@ function newGame(humanSlot: number | null, tutorial = false): void {
   if (!tutorial) {
     tutorialStep = -1;
     coach.classList.add('hidden');
-    world.forceHomeArrow = false;
   }
   replayLeft = -1;
   human = humanSlot;
@@ -233,7 +232,6 @@ function startTutorial(): void {
 function endTutorial(): void {
   tutorialStep = -1;
   coach.classList.add('hidden');
-  world.forceHomeArrow = false;
   store.settings.tutorialDone = true;
   store.save();
   startMatch();
@@ -245,14 +243,12 @@ function tutorialProgress(events: GameEvent[]): void {
   const me = game.players[human];
   if (tutorialStep === 0 && me.trail.length >= 4 * UNIT) {
     tutorialStep = 1;
-    world.forceHomeArrow = true;
-    setCoach('Now ride back home!', 'none');
+    setCoach('Now ride back to your colour!', 'none');
   }
   for (const e of events) {
     if (tutorialStep === 1 && e.type === 'capture' && e.pid === human) {
       tutorialStep = 2;
-      world.forceHomeArrow = false;
-      me.balls = Math.max(me.balls, 3);
+        me.balls = Math.max(me.balls, 3);
       hud.combo('Land grabbed!', PLAYER_COLORS[human]);
       setCoach('Tap to throw a paint ball!', 'tap');
     } else if (tutorialStep === 2 && e.type === 'throw' && e.pid === human) {
@@ -362,8 +358,8 @@ function handleEvents(events: GameEvent[]): void {
           vibrate(200);
           hud.toast(`${nameOf(e.by)} stole your egg! Bump them!`, true);
         } else if (e.by === me) {
-          hud.combo('Egg thief!', '#f08c00');
-          hud.toast('Run home with it!');
+          hud.combo('Egg grabbed!', '#f08c00');
+          hud.toast('Ride to your colour to keep it!');
         } else hud.toast(`${nameOf(e.by)} nabbed ${nameOf(e.owner)}'s egg!`);
         break;
       case 'eggDropped':
@@ -729,7 +725,7 @@ function loop(now: number): void {
     sound.setRide(riding ? me.glide : 0, Math.min(1, Math.abs(me.turn) / CONFIG.turnRate));
   } else sound.setRide(0, 0);
   world.frame(dt);
-  if (phase !== 'menu') hud.update(game, human, world.camera, dt);
+  if (phase !== 'menu') hud.update(game, human, dt);
   requestAnimationFrame(loop);
 }
 

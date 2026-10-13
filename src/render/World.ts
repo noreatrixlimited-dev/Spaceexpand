@@ -45,16 +45,11 @@ export class World {
   private time = 0;
   private starScale = 0;
   private half = 20;
-  // Cues for the human player: throw-ready ring, home arrow, trail danger.
+  // Cues for the human player: throw-ready ring and trail danger.
   private readonly readyRing: THREE.Mesh;
-  private readonly homeArrow: THREE.Mesh;
-  private homeTarget: { x: number; y: number } | null = null;
-  private homeTimer = 0;
   private humanId: number | null = null;
   /** 0..1: how risky the human's trail is right now (drives the red pulse and heartbeat). */
   danger = 0;
-  /** Force the home arrow on (tutorial). */
-  forceHomeArrow = false;
   private punch = 0;
   mode: CameraMode = 'orbit';
   followId = 0;
@@ -91,21 +86,8 @@ export class World {
     );
     this.readyRing.rotation.x = -Math.PI / 2;
     this.readyRing.renderOrder = 2;
-    const chevron = new THREE.Shape();
-    chevron.moveTo(0, 0.55);
-    chevron.lineTo(0.42, -0.2);
-    chevron.lineTo(0.14, -0.1);
-    chevron.lineTo(0.14, -0.5);
-    chevron.lineTo(-0.14, -0.5);
-    chevron.lineTo(-0.14, -0.1);
-    chevron.lineTo(-0.42, -0.2);
-    chevron.closePath();
-    const arrowGeo = new THREE.ShapeGeometry(chevron);
-    arrowGeo.rotateX(-Math.PI / 2);
-    this.homeArrow = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9, depthWrite: false }));
-    this.homeArrow.renderOrder = 3;
-    this.readyRing.visible = this.homeArrow.visible = false;
-    this.scene.add(this.matchGroup, this.particles.mesh, this.starMesh, this.readyRing, this.homeArrow);
+    this.readyRing.visible = false;
+    this.scene.add(this.matchGroup, this.particles.mesh, this.starMesh, this.readyRing);
     this.buildPost();
     this.resize();
   }
@@ -202,7 +184,6 @@ export class World {
       this.matchGroup.add(egg.nest, egg.egg);
     }
     this.humanId = game.opts.humanSlot;
-    this.homeTarget = null;
     this.danger = 0;
     this.lastHeading = game.players.map((p) => p.heading);
     this.turnVis = [0, 0, 0, 0];
@@ -411,7 +392,7 @@ export class World {
     const id = this.humanId;
     const p = id === null ? null : game.players[id];
     if (!p || !this.territory || p.status !== 'alive' || game.over) {
-      this.readyRing.visible = this.homeArrow.visible = false;
+      this.readyRing.visible = false;
       this.territory?.setDanger(null, 0);
       this.danger = 0;
       return;
@@ -443,34 +424,6 @@ export class World {
     this.danger += (want - this.danger) * Math.min(1, dt * 4);
     this.territory.setDanger(p.id, this.danger);
 
-    // Arrow pointing home when you're out on a trail.
-    const showArrow = p.trail.length > 0 && (this.forceHomeArrow || p.trail.length > 4 * U || this.danger > 0.5);
-    this.homeTimer -= dt;
-    if (showArrow && (this.homeTimer <= 0 || !this.homeTarget)) {
-      this.homeTimer = 0.2;
-      const g = game.grid;
-      let best = Infinity;
-      this.homeTarget = null;
-      for (let i = 0; i < g.owner.length; i++) {
-        if (g.owner[i] !== p.id) continue;
-        const x = i % g.size;
-        const y = (i - x) / g.size;
-        const d = (x + 0.5 - p.px) ** 2 + (y + 0.5 - p.py) ** 2;
-        if (d < best) {
-          best = d;
-          this.homeTarget = { x: x + 0.5, y: y + 0.5 };
-        }
-      }
-    }
-    this.homeArrow.visible = showArrow && this.homeTarget !== null;
-    if (this.homeArrow.visible && this.homeTarget) {
-      const a = Math.atan2(this.homeTarget.y - p.py, this.homeTarget.x - p.px);
-      const r = 1.5 + Math.sin(this.time * 6) * 0.12;
-      this.homeArrow.position.set(pos.x + Math.cos(a) * r, 0.06, pos.z + Math.sin(a) * r);
-      this.homeArrow.rotation.y = -a - Math.PI / 2;
-      const m = this.homeArrow.material as THREE.MeshBasicMaterial;
-      m.color.set('#ffffff').lerp(new THREE.Color('#ff3b5c'), this.danger);
-    }
   }
 
   private updateCamera(dt: number): void {

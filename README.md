@@ -15,15 +15,13 @@ Every push builds an APK on GitHub Actions and publishes it as a **GitHub releas
 The APK is signed with a debug key, which is fine for sideloading. A Play Store release needs your own signing key (see the plan).
 
 ## First time?
-Press **Play** and a 30-second guided ride teaches you as you go: ride out, ride back home, throw a ball. After that you play a real match.
+Press **Play** and a 30-second guided ride teaches you as you go: ride out, ride back to your colour, throw a ball. After that you play a real match.
 
 The game shows rather than tells:
 - your trail pulses and turns red as it gets risky (with a heartbeat sound),
-- a "+x%" above your robot shows what you'd gain by closing the loop now,
-- an arrow points home when you're far out,
 - a ring under you means a throw is ready.
 
-Combo pop-ups celebrate big moments: Double grab!, Huge grab!, Revenge!, Trail hunter!, Egg thief! and Nest captured! After a match, the next one starts by itself in 5 seconds (or tap Menu).
+Combo pop-ups celebrate big moments: Double grab!, Huge grab!, Revenge!, Trail hunter!, Egg grabbed! and Nest captured! After a match, the next one starts by itself in 5 seconds (or tap Menu).
 
 ## How to play
 - **Ride:** drag anywhere on the screen (a joystick appears under your finger). Your robot rides a board like a snowboard: it builds up speed from a stop, carves smooth turns while leaning into them, throws snow spray, and slows a little in hard turns. On a keyboard, use WASD/arrows (8 directions).
@@ -35,7 +33,7 @@ Combo pop-ups celebrate big moments: Double grab!, Huge grab!, Revenge!, Trail h
   - It pops a heart off an enemy nest.
 - **More land = more balls:** your pouch grows from 3 to 12 balls and refills faster the more land you own. The smallest player refills faster, and rainbow ball piles appear on unclaimed land.
 - **Careful:** anyone touching your trail bonks you, and your egg loses a heart.
-- **Steal:** touch enemy eggs to pop their hearts. At 0 hearts, grab the egg and carry it to your own nest. Bump a thief to send an egg back.
+- **Steal:** touch enemy eggs to pop their hearts. At 0 hearts, grab the egg; the moment you touch any land in your own colour, the nest is captured. Bump a rider carrying an egg to send it back.
 - **Survive:** after 1:00 the clouds eat the rounded island from its edge inward. Grab the centre star for a speed boost, a bubble shield or a freeze on the clouds.
 - **Captured?** Once a nest is captured it never comes back: that player is out (bots drift on as ghosts that can cut their capturer's rivals' trails). If it's your nest, the match ends for you and goes to results.
 - **Win:** be the last nest standing, or own the most land when the 3-minute timer ends.

@@ -367,6 +367,11 @@ export class Game {
 
     if (g.owner[cell] === p.id) {
       if (p.trail.length) this.closeLoop(p);
+      // A stolen egg is captured as soon as the thief reaches their own colour.
+      if (p.carrying >= 0) {
+        this.captureCore(p, p.carrying);
+        if (p.status !== 'alive') return;
+      }
     } else if (g.trail[cell] !== p.id) {
       g.trail[cell] = p.id;
       p.trail.push(cell);
@@ -375,9 +380,7 @@ export class Game {
 
     for (const c of this.cores) {
       if (c.state === 'captured' || !this.near(c, p.x, p.y)) continue;
-      if (c.owner === p.id) {
-        if (p.carrying >= 0) this.captureCore(p, p.carrying);
-      } else if (c.state === 'nest' && p.carrying < 0) {
+      if (c.owner !== p.id && c.state === 'nest' && p.carrying < 0) {
         this.hitCore(c, p);
       }
     }
@@ -505,6 +508,8 @@ export class Game {
       p.carrying = c.owner;
       p.stats.eggsStolen++;
       this.events.push({ type: 'coreStolen', owner: c.owner, by: p.id });
+      // Grabbed while already standing on your own colour: it's yours right away.
+      if (this.grid.owner[this.grid.idx(p.x, p.y)] === p.id) this.captureCore(p, c.owner);
     }
   }
 

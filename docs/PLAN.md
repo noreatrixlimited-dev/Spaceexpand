@@ -295,6 +295,12 @@ Before committing to a name, check the Play Store and App Store, web domains and
 
 Ghosts can no longer break free. Once a nest is captured, that player is out for the rest of the match. Captured bots drift as ghosts that can cut the trails of their capturer's rivals. A captured human goes straight to the results screen after a short beat.
 
+## 12e. Update: eggs capture on your own colour
+
+A stolen egg is captured as soon as the thief touches any land in their own colour (or instantly, if they grab it while standing on their colour). They no longer need to reach their nest.
+
+Removed from the screen: the home arrow, the thief arrow with its "Thief!" label, and the floating "+%" over the robot. The leaderboard and your own % stay.
+
 ## 13. Status
 
 **Phase 1 (M0–M7) is done** and ships as an Android APK built by GitHub Actions (`.github/workflows/android.yml`).

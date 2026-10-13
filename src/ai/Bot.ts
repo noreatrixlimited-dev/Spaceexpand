@@ -117,8 +117,8 @@ export class Bots {
 
     if (p.carrying >= 0) {
       if (this.mode[p.id] !== 'carry' || !p.plan.length) {
-        const core = game.cores[p.id];
-        p.plan = this.path(p, (i) => Math.hypot(g.x(i) - core.x, g.y(i) - core.y) <= CONFIG.nestReach - 0.5) ?? [];
+        // Any land in my colour will do.
+        p.plan = this.path(p, (i) => g.owner[i] === p.id) ?? [];
         this.mode[p.id] = 'carry';
       }
       this.follow(p);

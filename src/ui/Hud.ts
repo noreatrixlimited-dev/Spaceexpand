@@ -1,5 +1,4 @@
-import * as THREE from 'three';
-import { CONFIG, PLAYER_COLORS, UNIT } from '../config';
+import { CONFIG, PLAYER_COLORS } from '../config';
 import type { Game } from '../core/Game';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -14,14 +13,11 @@ export class Hud {
   private readonly timer = $('timer');
   private readonly power = $('power');
   private readonly toasts = $('toasts');
-  private readonly arrow = $('thief-arrow');
   private readonly countdownEl = $('countdown');
   private readonly ammo = $('ammo');
   private readonly ammoCap = $('ammoCap');
   private readonly throwBtn = $('throwBtn');
-  private readonly gainEl = $('gain');
   private readonly comboEl = $('combo');
-  private gainTimer = 0;
   private rows: HTMLElement[] = [];
   private lastTimerText = '';
   private boardTimer = 0;
@@ -43,12 +39,10 @@ export class Hud {
     if (human !== null) this.meBox.style.setProperty('--c', PLAYER_COLORS[human]);
     this.meBox.classList.toggle('hidden', human === null);
     this.toasts.innerHTML = '';
-    this.arrow.classList.add('hidden');
     this.power.classList.add('hidden');
-    this.gainEl.classList.add('hidden');
     this.comboEl.innerHTML = '';
     this.boardTimer = 0;
-    this.update(game, human, null, 1);
+    this.update(game, human, 1);
   }
 
   toast(text: string, big = false): void {
@@ -75,7 +69,7 @@ export class Hud {
     this.countdownEl.innerHTML = text ? `<span>${text}</span>` : '';
   }
 
-  update(game: Game, human: number | null, camera: THREE.Camera | null, dt: number): void {
+  update(game: Game, human: number | null, dt: number): void {
     // Leaderboard: rows slide into rank order; bar width = share of the island.
     this.boardTimer -= dt;
     if (this.boardTimer <= 0) {
@@ -122,24 +116,6 @@ export class Hud {
             : [0, 1, 2].map((i) => `<span class="heart${i < core.hearts ? '' : ' off'}"></span>`).join('');
     }
 
-    // Live "+x%" over your robot: what closing the loop right now would earn.
-    this.gainTimer -= dt;
-    if (this.gainTimer <= 0) {
-      this.gainTimer = 0.3;
-      const gain = p.status === 'alive' ? game.previewGain(human) : 0;
-      const pct = (gain / game.totalCells) * 100;
-      this.gainEl.classList.toggle('hidden', gain <= 0);
-      if (gain > 0) {
-        this.gainEl.textContent = `+${pct < 1 ? pct.toFixed(1) : pct.toFixed(0)}%`;
-        this.gainEl.classList.toggle('juicy', pct >= 3);
-      }
-    }
-    if (camera && !this.gainEl.classList.contains('hidden')) {
-      const v = new THREE.Vector3((p.px - game.grid.size / 2) / UNIT, 2.3, (p.py - game.grid.size / 2) / UNIT).project(camera);
-      this.gainEl.style.left = `${((v.x + 1) / 2) * window.innerWidth}px`;
-      this.gainEl.style.top = `${((1 - v.y) / 2) * window.innerHeight}px`;
-    }
-
     const ammo = p.status === 'shade' ? 0 : p.balls;
     if (this.ammo.textContent !== String(ammo)) this.ammo.textContent = String(ammo);
     const cap = `/${game.ballCap(human)}`;
@@ -154,28 +130,5 @@ export class Hud {
       this.power.textContent = `Clouds frozen ${Math.ceil(game.voidFrozen)}`;
     } else this.power.classList.add('hidden');
 
-    // Point at whoever is carrying my egg.
-    if (camera && core.state === 'carried' && core.carrier >= 0) {
-      const thief = game.players[core.carrier];
-      const v = new THREE.Vector3((thief.px - game.grid.size / 2) / UNIT, 0.5, (thief.py - game.grid.size / 2) / UNIT).project(camera);
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      const onScreen = Math.abs(v.x) < 0.9 && Math.abs(v.y) < 0.85 && v.z < 1;
-      this.arrow.classList.toggle('hidden', onScreen);
-      if (!onScreen) {
-        let x = v.x;
-        let y = v.y;
-        if (v.z > 1) {
-          x = -x;
-          y = -y;
-        }
-        const m = Math.max(Math.abs(x) / 0.85, Math.abs(y) / 0.8, 1);
-        x /= m;
-        y /= m;
-        this.arrow.style.left = `${((x + 1) / 2) * w}px`;
-        this.arrow.style.top = `${((1 - y) / 2) * h}px`;
-        (this.arrow.firstElementChild as HTMLElement).style.transform = `rotate(${Math.atan2(-y, x) + Math.PI / 2}rad)`;
-      }
-    } else this.arrow.classList.add('hidden');
   }
 }

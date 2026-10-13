@@ -167,6 +167,18 @@ describe('nests', () => {
     expect(g.players[0].status).toBe('shade');
     expect(g.land[0]).toBe(0);
   });
+  it('a stolen egg is captured the moment the thief touches any land in their colour', () => {
+    const g = newGame();
+    hitUntilStolen(g);
+    expect(g.cores[0].state).toBe('carried');
+    // Paint a far-away patch for player 1 (nowhere near their nest), then ride onto it.
+    const m = g.grid.size / 2;
+    for (let y = m - 2; y <= m + 2; y++) for (let x = m + 3; x <= m + 6; x++) g.grid.owner[g.grid.idx(x, y)] = 1;
+    place(g, 1, m, m);
+    walk(g, 1, RIGHT, 3);
+    expect(g.cores[0].state).toBe('captured');
+    expect(g.players[0].status).toBe('shade');
+  });
   it('bumping into a carrier sends the egg home with one heart', () => {
     const g = newGame();
     hitUntilStolen(g);
