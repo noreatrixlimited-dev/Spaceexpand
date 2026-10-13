@@ -12,6 +12,7 @@ import { Scenery, type Art } from './Scenery';
 import { starGeometry } from './shapes';
 import { Territory } from './Territory';
 import { WorldMap } from './WorldMap';
+import { getSkin, type Skin } from '../skins';
 
 type Avatar = Blob | Critter;
 const SWOOP_TIME = 2.6;
@@ -167,7 +168,12 @@ export class World {
     return out.set(px / UNIT - this.half, h, py / UNIT - this.half);
   }
 
-  setGame(game: Game): void {
+  /** Skins per player id for the next match. */
+  private skins: Skin[] = [];
+  private trailAcc = [0, 0, 0, 0];
+
+  setGame(game: Game, skins: number[] = []): void {
+    this.skins = game.players.map((p) => getSkin(skins[p.id] ?? 0));
     this.matchGroup.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (mesh.geometry) mesh.geometry.dispose();
@@ -188,7 +194,7 @@ export class World {
     this.avatarPos = [];
     this.nestPos = [];
     for (const p of game.players) {
-      const b: Avatar = this.art ? new Critter(p.id, p.isHuman, this.art.character) : new Blob(p.id, p.isHuman);
+      const b: Avatar = this.art ? new Critter(p.id, p.isHuman, this.art.character, this.skins[p.id]) : new Blob(p.id, p.isHuman);
       this.avatars.push(b);
       const pos = this.gridPos(p.px, p.py);
       this.avatarPos.push(pos.clone());
@@ -378,6 +384,19 @@ export class World {
             const side = new THREE.Vector3(-fz * s, 0, fx * s).multiplyScalar(0.6 + carve).addScaledVector(new THREE.Vector3(-fx, 0, -fz), 0.5);
             const tail = cur.clone().add(new THREE.Vector3(-fx * 0.45, 0.12, -fz * 0.45));
             this.particles.spray(tail, side, n);
+          }
+          // Skin trail effect.
+          const skin = this.skins[p.id];
+          if (skin && skin.trail !== 'none') {
+            this.trailAcc[p.id] += dt * 16 * p.glide;
+            while (this.trailAcc[p.id] >= 1) {
+              this.trailAcc[p.id] -= 1;
+              const fx = Math.cos(p.heading);
+              const fz = Math.sin(p.heading);
+              const at = cur.clone().add(new THREE.Vector3(-fx * 0.55, 0.15, -fz * 0.55));
+              const col = skin.trail === 'rainbow' ? skin.trailColors[Math.floor(this.time * 8) % skin.trailColors.length] : skin.trailColors[Math.floor(Math.random() * skin.trailColors.length)];
+              this.particles.trail(at, skin.trail, col);
+            }
           }
         }
 

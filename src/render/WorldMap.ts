@@ -6,6 +6,7 @@ import { Blob } from './Blob';
 import { Critter } from './Critter';
 import { toon } from './materials';
 import type { Art } from './Scenery';
+import { getSkin } from '../skins';
 
 /** World-map units per island unit: islands are shown as small models on the big ocean. */
 const S = 0.2;
@@ -42,6 +43,7 @@ export class WorldMap {
   private readonly clouds: THREE.Group[] = [];
   private robot: Critter | Blob;
   private robotSlot = -1;
+  private robotSkin = -1;
   private art: Art | null = null;
   private time = 0;
   private camTarget = new THREE.Vector3();
@@ -52,7 +54,7 @@ export class WorldMap {
   /** Seconds left of the arrival bounce. */
   private arrive = 0;
 
-  constructor(art: Art | null, slot: number) {
+  constructor(art: Art | null, slot: number, skin = 0) {
     this.art = art;
     this.scene.background = new THREE.Color('#bfe9f7');
     this.scene.add(new THREE.HemisphereLight('#ffffff', '#9fc9e0', 1.9));
@@ -65,13 +67,14 @@ export class WorldMap {
     LEVEL_MAPS.forEach((m, i) => this.islands.push(this.buildIsland(m, i)));
     this.buildPaths();
     this.buildDecor();
-    this.robot = this.makeRobot(slot);
+    this.robot = this.makeRobot(slot, skin);
   }
 
-  private makeRobot(slot: number): Critter | Blob {
+  private makeRobot(slot: number, skin: number): Critter | Blob {
     if (this.robot) this.scene.remove(this.robot.root);
     this.robotSlot = slot;
-    const r = this.art ? new Critter(slot, false, this.art.character) : new Blob(slot, false);
+    this.robotSkin = skin;
+    const r = this.art ? new Critter(slot, false, this.art.character, getSkin(skin)) : new Blob(slot, false);
     r.root.scale.setScalar(1.7);
     this.scene.add(r.root);
     return r;
@@ -257,9 +260,9 @@ export class WorldMap {
   }
 
   /** Show progress: `unlocked` islands are playable, those before `beaten` have a flag. */
-  setState(unlocked: number, beaten: number, selected: number, slot: number): void {
-    if (slot !== this.robotSlot) {
-      this.robot = this.makeRobot(slot);
+  setState(unlocked: number, beaten: number, selected: number, slot: number, skin = 0): void {
+    if (slot !== this.robotSlot || skin !== this.robotSkin) {
+      this.robot = this.makeRobot(slot, skin);
       this.dotDone.color.set(PLAYER_COLORS[slot]);
     }
     this.islands.forEach((v, i) => {

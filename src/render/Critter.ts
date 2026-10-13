@@ -5,11 +5,13 @@ import { recolorTexture } from './assets';
 import type { BlobMood } from './Blob';
 import { toon } from './materials';
 import { crownGeometry, starGeometry } from './shapes';
+import { buildHat } from './hats';
+import { SKINS, type Skin } from '../skins';
 
 const dizzyStar = starGeometry(0.11, 0.05, 0.04);
 const crownGeo = crownGeometry();
 const sphere = new THREE.SphereGeometry(1, 20, 14);
-const texCache = new Map<number, THREE.Texture>();
+const texCache = new Map<string, THREE.Texture>();
 
 /** A board shaped like a little snowboard: rounded ends, slight upturned nose and tail. */
 function boardGeometry(): THREE.BufferGeometry {
@@ -55,6 +57,7 @@ export class Critter {
   private readonly shadow: THREE.Mesh;
   private readonly board = new THREE.Group();
   private leanCur = 0;
+  private hatLift = 0;
   private yaw = 0;
   private targetYaw = 0;
   private squashKick = 0;
@@ -67,9 +70,10 @@ export class Critter {
   /** -1..1, how hard we're carving (positive = turning right). */
   lean = 0;
 
-  constructor(id: number, isHuman: boolean, gltf: GLTF) {
+  constructor(id: number, isHuman: boolean, gltf: GLTF, skin: Skin = SKINS[0]) {
     this.model = gltf.scene.clone(true);
-    let tex = texCache.get(id);
+    const key = `${id}:${skin.body ?? ''}`;
+    let tex = texCache.get(key);
     if (!tex) {
       let base: THREE.Texture | null = null;
       this.model.traverse((o) => {
@@ -79,8 +83,10 @@ export class Critter {
       if (base) {
         // Limbs/antenna use the purple palette column, the body the white one.
         tex = recolorTexture(base, { x: 448, y: 256, w: 64, h: 128 }, PLAYER_COLORS[id]);
-        tex = recolorTexture(tex, { x: 256, y: 384, w: 64, h: 128 }, new THREE.Color(PLAYER_COLORS[id]).lerp(new THREE.Color('#ffffff'), 0.72));
-        texCache.set(id, tex);
+        // The body takes the skin's colour; limbs keep the team colour so teams stay readable.
+        const body = skin.body ? new THREE.Color(skin.body) : new THREE.Color(PLAYER_COLORS[id]).lerp(new THREE.Color('#ffffff'), 0.72);
+        tex = recolorTexture(tex, { x: 256, y: 384, w: 64, h: 128 }, body);
+        texCache.set(key, tex);
       }
     }
     this.model.traverse((o) => {
@@ -96,14 +102,25 @@ export class Critter {
     this.model.rotation.y = 0.35; // a little sideways, like a snowboard stance
     this.body.add(this.model);
 
+    // Skin hat sits on the head (the torso block's top) and replaces the antenna.
+    const { hat, height } = buildHat(skin.hat);
+    const torso = this.model.getObjectByName('torso');
+    if (torso && skin.hat !== 'none') {
+      hat.position.y = 0.6;
+      torso.add(hat);
+      const antenna = this.model.getObjectByName('antenna');
+      if (antenna) antenna.visible = false;
+    }
+    this.hatLift = height * 1.5;
+
     // The board: player colour on top with a white stripe and dark bindings.
     // Dark deck so it reads on any ground, with a wide stripe in the player's colour.
-    const deck = new THREE.Mesh(boardGeo, toon('#2e3148', { roughness: 0.35 }));
+    const deck = new THREE.Mesh(boardGeo, toon(skin.deck, { roughness: 0.35 }));
     deck.castShadow = true;
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.012, 0.86), toon(PLAYER_COLORS[id], { roughness: 0.35 }));
     stripe.position.y = 0.122;
     for (const z of [-0.6, 0.6]) {
-      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 6), toon('#ffffff', { roughness: 0.4 }));
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 6), toon(skin.tips, { roughness: 0.4 }));
       tip.scale.set(1.6, 0.5, 0.8);
       tip.position.set(0, 0.2, z);
       this.board.add(tip);
@@ -140,7 +157,7 @@ export class Critter {
     this.root.add(this.stars);
 
     this.crown = new THREE.Mesh(crownGeo, toon('#ffcf33', { side: THREE.DoubleSide, metalness: 0.3, roughness: 0.35 }));
-    this.crown.position.y = 1.38;
+    this.crown.position.y = 1.38 + this.hatLift;
     this.crown.visible = false;
     this.body.add(this.crown);
 
@@ -233,7 +250,7 @@ export class Critter {
       });
     }
     if (this.marker) {
-      this.marker.position.y = 1.9 + Math.sin(time * 4) * 0.08 + (this.carrying ? 0.45 : 0);
+      this.marker.position.y = 1.9 + this.hatLift + Math.sin(time * 4) * 0.08 + (this.carrying ? 0.45 : 0);
       this.marker.rotation.y = time * 2;
     }
     if (this.shield.visible) this.shield.scale.setScalar(0.75 + Math.sin(time * 6) * 0.03);

@@ -12,6 +12,7 @@ import { Director, pickMood } from './ai/Director';
 import { Sound } from './audio/Sound';
 import { CONFIG, PLAYER_COLORS, UNIT, type MatchOptions } from './config';
 import { LEVEL_MAPS } from './maps';
+import { SKINS } from './skins';
 import { Game, type GameEvent } from './core/Game';
 import { Input } from './input/Input';
 import { loadArt } from './render/Scenery';
@@ -74,6 +75,38 @@ function beatenCount(): number {
   return store.stats.champion ? LEVEL_MAPS.length : store.stats.unlocked - 1;
 }
 
+/** The equipped skin, if it's unlocked (otherwise the classic look). */
+function equippedSkin(): number {
+  const k = store.settings.skin;
+  return SKINS[k] && SKINS[k].unlockAt <= beatenCount() ? k : 0;
+}
+
+function buildSkinPicker(): void {
+  const wrap = $('skins');
+  wrap.innerHTML = '';
+  const have = beatenCount();
+  SKINS.forEach((sk, k) => {
+    const b = document.createElement('button');
+    const locked = sk.unlockAt > have;
+    b.className = 'skin-card' + (k === equippedSkin() ? ' selected' : '') + (locked ? ' locked' : '');
+    const swatch = [sk.body ?? '#ffffff', sk.deck, ...(sk.trailColors.length ? [sk.trailColors[0]] : [sk.tips])];
+    b.innerHTML = `<span class="sw">${swatch.map((c) => `<i style="background:${c}"></i>`).join('')}</span><b>${sk.name}</b><small>${locked ? `Win island ${sk.unlockAt}` : k === equippedSkin() ? 'Equipped' : 'Tap to wear'}</small>`;
+    b.onclick = () => {
+      sound.unlock();
+      if (locked) {
+        sound.empty();
+        return;
+      }
+      sound.click();
+      store.settings.skin = k;
+      store.save();
+      buildSkinPicker();
+      if (phase === 'menu') openWorldMap();
+    };
+    wrap.appendChild(b);
+  });
+}
+
 /** A trip to make the next time the world map opens (after winning an island). */
 let pendingTravel: { from: number; to: number } | null = null;
 
@@ -88,6 +121,7 @@ function showIslandCard(): void {
 
 function openWorldMap(): void {
   const atlas = world.getAtlas(store.settings.slot);
+  buildSkinPicker();
   world.showAtlas = true;
   const title = $('title');
   const trip = pendingTravel;
@@ -95,13 +129,15 @@ function openWorldMap(): void {
   if (trip) {
     // Stand on the island just won, then ride to the next one; the Play card pops up on arrival.
     store.settings.map = LEVEL_MAPS[trip.from].id;
-    atlas.setState(store.stats.unlocked, beatenCount(), trip.from, store.settings.slot);
+    atlas.setState(store.stats.unlocked, beatenCount(), trip.from, store.settings.slot, equippedSkin());
     store.settings.map = LEVEL_MAPS[trip.to].id;
     store.save();
     title.classList.add('traveling');
     window.setTimeout(() => {
       sound.whoosh();
       atlas.travel(trip.from, trip.to, () => {
+        sound.setMusicStyle(trip.to, true);
+        sound.heartGained();
         title.classList.remove('traveling');
         showIslandCard();
         sound.click();
@@ -110,7 +146,7 @@ function openWorldMap(): void {
     }, 700);
   } else {
     title.classList.remove('traveling');
-    atlas.setState(store.stats.unlocked, beatenCount(), levelIndex(), store.settings.slot);
+    atlas.setState(store.stats.unlocked, beatenCount(), levelIndex(), store.settings.slot, equippedSkin());
   }
   showIslandCard();
 }
@@ -156,11 +192,14 @@ function setupMapTouch(): void {
     store.save();
     if (from === i) {
       atlas.drag(0, 0);
-      atlas.setState(store.stats.unlocked, beatenCount(), i, store.settings.slot);
+      atlas.setState(store.stats.unlocked, beatenCount(), i, store.settings.slot, equippedSkin());
       return;
     }
     $('title').classList.add('traveling');
+    sound.startMusic();
+    sound.whoosh();
     atlas.travel(from, i, () => {
+      sound.setMusicStyle(i, true);
       $('title').classList.remove('traveling');
       showIslandCard();
     });
@@ -246,7 +285,10 @@ function newGame(humanSlot: number | null, tutorial = false): void {
   }
   replayLeft = -1;
   human = humanSlot;
-  world.setGame(game);
+  // You wear your skin; the bots show off others (a peek at what you can unlock).
+  const lvl = levelIndex();
+  const skins = game.players.map((p) => (p.id === humanSlot ? equippedSkin() : 1 + ((lvl + p.id * 3) % (SKINS.length - 1))));
+  world.setGame(game, skins);
   world.mode = humanSlot === null ? 'orbit' : 'follow';
   world.followId = humanSlot ?? 0;
   hud.build(game, humanSlot);
@@ -259,6 +301,8 @@ function startAttract(): void {
   replayLeft = -1;
   againBtn.textContent = 'Play again';
   hud.show(false);
+  sound.setMusicStyle(levelIndex(), true);
+  sound.startMusic();
   openWorldMap();
   applySettings();
   updateStatsLine();
@@ -267,6 +311,7 @@ function startAttract(): void {
 
 function startMatch(): void {
   sound.unlock();
+  sound.setMusicStyle(levelIndex(), false);
   sound.startMusic();
   newGame(store.settings.slot);
   world.showAtlas = false;
@@ -301,6 +346,7 @@ function setCoach(text: string, finger: 'drag' | 'tap' | 'none'): void {
 
 function startTutorial(): void {
   sound.unlock();
+  sound.setMusicStyle(levelIndex(), false);
   sound.startMusic();
   newGame(store.settings.slot, true);
   world.showAtlas = false;
@@ -538,6 +584,7 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   // Island progress: winning an island opens the next one, and the map rides you there.
   const lvl = LEVEL_MAPS.findIndex((m) => m.id === game.map.id);
   let unlockedNew = false;
+  const skinsBefore = beatenCount();
   if (won && lvl >= 0) {
     if (lvl === st.unlocked - 1 && st.unlocked < LEVEL_MAPS.length) {
       st.unlocked++;
@@ -555,6 +602,14 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   $('resultReason').textContent =
     reason === 'captured' ? 'Your nest was captured' : reason === 'last' ? 'Last nest standing' : 'Most land when time ran out';
   if (unlockedNew) $('resultReason').textContent += ` · ${LEVEL_MAPS[lvl + 1].name} unlocked!`;
+  const skinsNow = beatenCount();
+  if (skinsNow > skinsBefore && SKINS[skinsNow]) {
+    // New skin: wear it straight away (it can be changed under Style).
+    store.settings.skin = skinsNow;
+    store.save();
+    $('resultReason').textContent += ` New skin: ${SKINS[skinsNow].name}!`;
+    window.setTimeout(() => hud.toast(`New skin: ${SKINS[skinsNow].name}!`, true), 1600);
+  }
   const order = game.ranking();
   const big = $('resultBig');
   if (human !== null) {
@@ -793,6 +848,7 @@ function loop(now: number): void {
 
   if (phase === 'playing') {
     director?.update(dt);
+    sound.setHurry(CONFIG.matchSeconds - game.time < 30);
     tutorialTick(dt);
     // Heartbeat when your trail is in danger.
     heartbeatTimer -= dt;

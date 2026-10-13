@@ -13,6 +13,8 @@ export interface Settings {
   artVersion?: number;
   map: string;
   tutorialDone: boolean;
+  /** Equipped robot skin (index into SKINS). */
+  skin: number;
 }
 
 export interface Stats {
@@ -46,6 +48,7 @@ const defaults = (): { settings: Settings; stats: Stats } => ({
     seenHowTo: false,
     map: 'clover',
     tutorialDone: false,
+    skin: 0,
   },
   stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '', unlocked: 1, champion: false },
 });

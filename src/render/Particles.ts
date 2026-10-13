@@ -79,6 +79,34 @@ export class Particles {
     }
   }
 
+  /** Skin trail: a few little bits left behind the board. */
+  trail(pos: THREE.Vector3, kind: string, color: THREE.ColorRepresentation): void {
+    const v = new THREE.Vector3((Math.random() - 0.5) * 0.5, 0, (Math.random() - 0.5) * 0.5);
+    switch (kind) {
+      case 'flame':
+        v.y = 1.2 + Math.random();
+        this.spawn(pos, v, color, 0.07 + Math.random() * 0.05, 0.4, -2);
+        break;
+      case 'bubble':
+        v.y = 0.5 + Math.random() * 0.4;
+        this.spawn(pos, v, color, 0.06 + Math.random() * 0.06, 0.9, -0.6);
+        break;
+      case 'snow':
+      case 'leaf':
+        v.y = 0.8 + Math.random() * 0.6;
+        this.spawn(pos, v, color, 0.05 + Math.random() * 0.04, 0.8, 2.5);
+        break;
+      case 'honey':
+        v.y = 0.3;
+        this.spawn(pos, v, color, 0.07 + Math.random() * 0.04, 0.7, 4);
+        break;
+      default: // heart, star, rainbow: twinkly sparkles that float up
+        v.y = 0.6 + Math.random() * 0.8;
+        this.spawn(pos, v, color, 0.05 + Math.random() * 0.05, 0.7, -0.4);
+        break;
+    }
+  }
+
   confetti(pos: THREE.Vector3, count = 60): void {
     const colors = ['#ff7b7b', '#5ab8ff', '#4fd6a0', '#a98bf0', '#ffd43b', '#ff9ed2'];
     const v = new THREE.Vector3();

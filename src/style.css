@@ -1370,3 +1370,66 @@ button:active {
     transform: translateX(3px);
   }
 }
+
+/* ---------- skins ---------- */
+.map-screen .map-bottom {
+  max-height: calc(100% - 90px);
+  overflow-y: auto;
+}
+.map-screen #customize .label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 8px 0 6px;
+}
+.skins {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.skin-card {
+  font: inherit;
+  border: none;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 0 rgba(74, 54, 84, 0.14);
+  padding: 8px 4px 6px;
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+.skin-card b {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+.skin-card small {
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+.skin-card .sw {
+  display: flex;
+}
+.skin-card .sw i {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  margin-left: -4px;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.skin-card .sw i:first-child {
+  margin-left: 0;
+}
+.skin-card.selected {
+  outline: 3px solid var(--yellow);
+}
+.skin-card.locked {
+  opacity: 0.55;
+  filter: grayscale(0.8);
+}
