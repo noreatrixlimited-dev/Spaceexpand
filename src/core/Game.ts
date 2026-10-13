@@ -25,6 +25,10 @@ export interface Player {
   glide: number;
   /** How hard the player is turning right now (radians/second, signed) — used for leaning. */
   turn: number;
+  /** Per-player speed tweak (used by the match director). */
+  speedMul: number;
+  /** Per-player ball refill tweak (used by the match director). */
+  ballRateMul: number;
   status: PlayerStatus;
   bonkTimer: number;
   trail: number[];
@@ -169,6 +173,8 @@ export class Game {
         stunTimer: 0,
         glide: 0,
         turn: 0,
+        speedMul: 1,
+        ballRateMul: 1,
         status: 'alive',
         bonkTimer: 0,
         trail: [],
@@ -245,7 +251,7 @@ export class Game {
   }
 
   speedOf(p: Player): number {
-    let s = CONFIG.baseSpeed;
+    let s = CONFIG.baseSpeed * p.speedMul;
     if (p.status === 'shade') s *= CONFIG.shadeSpeedMul;
     if (p.carrying >= 0) s *= CONFIG.carrySpeedMul;
     if (p.power === 'speed') s *= CONFIG.boostSpeedMul;
@@ -611,6 +617,7 @@ export class Game {
       }
       let rate = CONFIG.ballRateBase + this.land[p.id] * CONFIG.ballRatePerCell;
       if (p.id === smallest) rate *= CONFIG.ballCatchUp;
+      rate *= p.ballRateMul;
       p.ballTimer += rate * dt;
       if (p.ballTimer >= 1) {
         p.ballTimer -= 1;

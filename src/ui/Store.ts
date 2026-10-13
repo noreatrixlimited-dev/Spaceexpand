@@ -1,4 +1,4 @@
-import type { Difficulty, StartMode } from '../config';
+import type { StartMode } from '../config';
 
 export interface Settings {
   music: boolean;
@@ -7,7 +7,6 @@ export interface Settings {
   startMode: StartMode;
   controls: 'swipe' | 'dpad';
   quality: 'high' | 'low';
-  difficulty: Difficulty;
   slot: number;
   vibrate: boolean;
   seenHowTo: boolean;
@@ -21,6 +20,8 @@ export interface Stats {
   bestLandPct: number;
   eggsCaptured: number;
   trailsCut: number;
+  /** Recent results, oldest first, e.g. "WLW" (used by the match director). */
+  recent: string;
 }
 
 const KEY = 'nestnappers.v1';
@@ -35,13 +36,12 @@ const defaults = (): { settings: Settings; stats: Stats } => ({
     startMode: 'patch',
     controls: 'swipe',
     quality: 'high',
-    difficulty: 'normal',
     slot: 0,
     vibrate: true,
     seenHowTo: false,
     map: 'classic',
   },
-  stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0 },
+  stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '' },
 });
 
 /** Settings and lifetime stats, saved in localStorage (best effort). */

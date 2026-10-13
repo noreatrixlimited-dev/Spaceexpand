@@ -28,15 +28,43 @@ type Mode = 'idle' | 'expand' | 'flee' | 'attack' | 'raid' | 'carry' | 'star' | 
 /** State-machine bots: Expand / Flee / Attack (trails) / Raid (nests) / Carry / Star / Ghost. */
 export class Bots {
   private readonly game: Game;
-  private readonly params: BotParams;
+  private paramsOf: BotParams[] = [];
+  /** Parameters for the bot currently deciding. */
+  private params!: BotParams;
+  /** The human player (if any) and how much bots go after them: <1 leave them alone, >1 gang up. */
+  readonly humanId: number | null;
+  humanBias = 1;
   private readonly mode: Mode[] = ['idle', 'idle', 'idle', 'idle'];
   private readonly lastThink = [-1, -1, -1, -1];
 
-  constructor(game: Game, difficulty: Difficulty) {
+  constructor(game: Game, skill: Difficulty | number) {
     this.game = game;
+    this.humanId = game.opts.humanSlot;
+    this.setSkill(typeof skill === 'number' ? skill : skill === 'easy' ? 0 : skill === 'normal' ? 0.5 : 1);
+    game.onArrive = (p) => this.decide(p);
+  }
+
+  /** Bot sharpness from 0 (sleepy) to 1 (sharp), for one bot or all; can change mid-match. */
+  setSkill(skill: number, pid?: number): void {
+    const t = Math.max(0, Math.min(1, skill));
+    const e = PARAMS.easy;
+    const n = PARAMS.normal;
+    const h = PARAMS.hard;
+    const mix = (k: keyof BotParams) => (t < 0.5 ? e[k] + (n[k] - e[k]) * t * 2 : n[k] + (h[k] - n[k]) * (t - 0.5) * 2);
+    const base: BotParams = {
+      reaction: mix('reaction'),
+      caution: mix('caution'),
+      attackRange: mix('attackRange'),
+      coreAggro: mix('coreAggro'),
+      coreRange: mix('coreRange'),
+      loopMin: Math.round(mix('loopMin')),
+      loopMax: Math.round(mix('loopMax')),
+      starRange: mix('starRange'),
+      throwTrail: mix('throwTrail'),
+      throwPlayer: mix('throwPlayer'),
+    };
     // Distances in the table are in world units; the rules grid is UNIT cells per unit.
-    const base = PARAMS[difficulty];
-    this.params = {
+    const scaled: BotParams = {
       ...base,
       caution: base.caution * UNIT,
       attackRange: base.attackRange * UNIT,
@@ -48,7 +76,18 @@ export class Bots {
       throwTrail: base.throwTrail / UNIT,
       throwPlayer: base.throwPlayer / UNIT,
     };
-    game.onArrive = (p) => this.decide(p);
+    for (let id = 0; id < 4; id++) if (pid === undefined || pid === id) this.paramsOf[id] = scaled;
+    this.params = scaled;
+  }
+
+  /** Whether this bot will go after `owner` right now (applies the human bias). */
+  private targets(owner: number): boolean {
+    if (owner !== this.humanId || this.humanBias >= 1) return true;
+    return this.game.rng.chance(this.humanBias);
+  }
+  /** Extra weight for picking the human as a target when bots gang up. */
+  private humanWeight(owner: number): number {
+    return owner === this.humanId ? this.humanBias : 1;
   }
 
   modeOf(pid: number): Mode {
@@ -56,6 +95,7 @@ export class Bots {
   }
 
   private decide(p: Player): void {
+    this.params = this.paramsOf[p.id];
     const game = this.game;
     const g = game.grid;
     const rng = game.rng;
@@ -102,11 +142,13 @@ export class Bots {
 
     // Opportunity: cut a nearby enemy trail.
     if (this.mode[p.id] !== 'flee' && this.mode[p.id] !== 'attack') {
-      const target = this.path(
-        p,
-        (i) => g.trail[i] >= 0 && g.trail[i] !== p.id && !this.isAlly(p, g.trail[i]),
-        this.params.attackRange,
-      );
+      const hitHuman = this.humanId !== null && this.targets(this.humanId);
+      const ok = (o: number) => o >= 0 && o !== p.id && !this.isAlly(p, o) && (o !== this.humanId || hitHuman);
+      // When ganging up, look further for the human's trail first.
+      const target =
+        (this.humanBias > 1 && hitHuman
+          ? this.path(p, (i) => g.trail[i] === this.humanId, this.params.attackRange * this.humanBias)
+          : null) ?? this.path(p, (i) => ok(g.trail[i]), this.params.attackRange);
       if (target) {
         p.plan = target;
         this.mode[p.id] = 'attack';
@@ -177,11 +219,11 @@ export class Bots {
     if (rng.chance(prm.coreAggro)) {
       let bestPath: number[] | null = null;
       for (const c of game.cores) {
-        if (c.owner === p.id || c.state !== 'nest' || this.isAlly(p, c.owner)) continue;
+        if (c.owner === p.id || c.state !== 'nest' || this.isAlly(p, c.owner) || !this.targets(c.owner)) continue;
         const ci = g.idx(c.x, c.y);
-        const route = this.path(p, (i) => manhattan(g, i, ci) <= CONFIG.nestReach - 1, prm.coreRange);
+        const route = this.path(p, (i) => manhattan(g, i, ci) <= CONFIG.nestReach - 1, prm.coreRange * Math.max(1, this.humanWeight(c.owner)));
         if (!route) continue;
-        const score = route.length + c.hearts * 4;
+        const score = (route.length + c.hearts * 4 * UNIT) / this.humanWeight(c.owner);
         if (!bestPath || score < bestPath.length) bestPath = route;
       }
       if (bestPath) {
@@ -372,14 +414,14 @@ export class Bots {
       for (let x = Math.max(0, Math.floor(p.px - R)); x <= Math.min(g.size - 1, Math.floor(p.px + R)); x++) {
         const t = g.trail[g.idx(x, y)];
         if (t < 0 || t === p.id || this.isAlly(p, t)) continue;
-        const d = Math.hypot(x + 0.5 - p.px, y + 0.5 - p.py);
+        const d = Math.hypot(x + 0.5 - p.px, y + 0.5 - p.py) / this.humanWeight(t);
         if (d >= 2 * UNIT && d <= R && d < bestD) {
           bestD = d;
           bestTrail = [x + 0.5, y + 0.5];
         }
       }
     }
-    if (bestTrail && rng.chance(prm.throwTrail)) {
+    if (bestTrail && rng.chance(prm.throwTrail) && this.targets(g.trail[g.idx(Math.floor(bestTrail[0]), Math.floor(bestTrail[1]))])) {
       game.throwAt(p.id, bestTrail[0], bestTrail[1]);
       return;
     }
@@ -390,7 +432,7 @@ export class Bots {
       const tx = q.px + Math.cos(q.heading) * lead;
       const ty = q.py + Math.sin(q.heading) * lead;
       if (!inRange(tx, ty)) continue;
-      if (rng.chance(q.carrying >= 0 ? prm.throwPlayer * 2 : prm.throwPlayer)) {
+      if (rng.chance((q.carrying >= 0 ? prm.throwPlayer * 2 : prm.throwPlayer) * this.humanWeight(q.id))) {
         game.throwAt(p.id, tx, ty);
         return;
       }
@@ -398,7 +440,7 @@ export class Bots {
     // 3. Enemy nests with hearts left.
     for (const c of game.cores) {
       if (c.owner === p.id || c.state !== 'nest' || c.hearts <= 0 || c.invuln > 0 || this.isAlly(p, c.owner)) continue;
-      if (inRange(c.x + 0.5, c.y + 0.5) && rng.chance(prm.throwPlayer)) {
+      if (inRange(c.x + 0.5, c.y + 0.5) && rng.chance(prm.throwPlayer * this.humanWeight(c.owner))) {
         game.throwAt(p.id, c.x + 0.5, c.y + 0.5);
         return;
       }

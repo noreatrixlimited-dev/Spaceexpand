@@ -8,6 +8,7 @@ import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 
 import { Bots } from './ai/Bot';
+import { Director, pickMood } from './ai/Director';
 import { Sound } from './audio/Sound';
 import { CONFIG, PLAYER_COLORS, type MatchOptions } from './config';
 import { MAPS } from './maps';
@@ -29,6 +30,7 @@ const hud = new Hud();
 const input = new Input($('scene'), $('dpad'), $('joy'), $('throwBtn'));
 
 let game: Game;
+let director: Director | null = null;
 let phase: Phase = 'menu';
 let human: number | null = null;
 let accumulator = 0;
@@ -100,11 +102,6 @@ buildMapPicker();
   });
 }
 
-function syncDifficulty(): void {
-  $('difficulty')
-    .querySelectorAll<HTMLButtonElement>('button')
-    .forEach((b) => b.classList.toggle('on', b.dataset.v === store.settings.difficulty));
-}
 
 function updateStatsLine(): void {
   const s = store.stats;
@@ -144,11 +141,13 @@ function newGame(humanSlot: number | null): void {
     startMode: store.settings.startMode,
     hardMode: store.settings.hardMode,
     humanSlot,
-    difficulty: store.settings.difficulty,
+    difficulty: 'normal',
     seed: (Math.random() * 1e9) | 0,
   };
   game = new Game(opts);
-  new Bots(game, humanSlot === null ? 'normal' : store.settings.difficulty);
+  const bots = new Bots(game, 0.5);
+  // No difficulty menu: the director picks how kind the bots are from recent results.
+  director = humanSlot === null ? null : new Director(game, bots, humanSlot, pickMood(store.stats.recent));
   human = humanSlot;
   world.setGame(game);
   world.mode = humanSlot === null ? 'orbit' : 'follow';
@@ -326,6 +325,7 @@ function onGameOver(winner: number, reason: 'last' | 'time'): void {
   const peakPct = (id: number) => (game.players[id].stats.peakLand / game.totalCells) * 100;
   st.games++;
   if (won) st.wins++;
+  st.recent = (st.recent + (won ? 'W' : 'L')).slice(-6);
   if (human !== null) st.bestLandPct = Math.max(st.bestLandPct, Math.round(peakPct(human)));
   store.save();
 
@@ -412,17 +412,6 @@ document.querySelectorAll<HTMLElement>('.back').forEach((b) => {
     showScreen(returnTo);
   };
 });
-$('difficulty')
-  .querySelectorAll<HTMLButtonElement>('button')
-  .forEach((b) => {
-    b.onclick = () => {
-      sound.unlock();
-      sound.click();
-      store.settings.difficulty = b.dataset.v as typeof store.settings.difficulty;
-      store.save();
-      syncDifficulty();
-    };
-  });
 document.querySelectorAll<HTMLInputElement>('[data-s]').forEach((el) => {
   el.onchange = () => {
     const s = store.settings;
@@ -458,7 +447,7 @@ document.querySelectorAll<HTMLInputElement>('[data-s]').forEach((el) => {
   };
 });
 $('resetStats').onclick = () => {
-  store.stats = { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0 };
+  store.stats = { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '' };
   store.save();
   updateStatsLine();
   sound.click();
@@ -559,6 +548,7 @@ function loop(now: number): void {
     if (countdownLeft <= 0.2) phase = 'playing';
   }
 
+  if (phase === 'playing') director?.update(dt);
   if (phase === 'playing' || phase === 'menu' || phase === 'over') {
     const step = 1 / CONFIG.tickRate;
     accumulator += dt;
@@ -618,7 +608,6 @@ if (location.search.includes('debug')) {
 buildLogo();
 buildColorPicker();
 buildMapPicker();
-syncDifficulty();
 syncSettingsUI();
 // Load the 3D art, then start. If it fails (e.g. offline web build), the game still runs with simple shapes.
 const playBtn = $<HTMLButtonElement>('playBtn');

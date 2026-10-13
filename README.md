@@ -28,6 +28,7 @@ The APK is signed with a debug key, which is fine for sideloading. A Play Store 
 - **Survive:** after 1:00 the clouds eat the rounded island from its edge inward. Grab the centre star for a speed boost, a bubble shield or a freeze on the clouds.
 - **Captured?** You become a ghost. Touch another player's nest to break free.
 - **Win:** be the last nest standing, or own the most land when the 3-minute timer ends.
+- **No difficulty menu:** the bots adapt on their own. Your first match and matches after losses are gentle (the bots go easy and mostly leave you alone). After two wins in a row the bots sharpen up and gang up on you. During every match they ease off or push harder depending on how you're doing.
 
 ## Develop
 ```bash
@@ -42,7 +43,7 @@ npx cap sync android && (cd android && ./gradlew assembleDebug)   # local APK (n
 |---|---|
 | `src/core` | Game rules on a fine invisible grid (3 cells per character width): trails, flood-fill capture, eggs, balls, the Void, power-ups (no rendering) |
 | `src/maps.ts` | Map shapes (circle, rounded square, hexagon) and colour themes |
-| `src/ai` | Bot brains (Expand / Flee / Attack / Raid / Carry / Star / Ghost) |
+| `src/ai` | Bot brains (Expand / Flee / Attack / Raid / Carry / Star / Ghost) and the match director (adaptive difficulty) |
 | `src/render` | Three.js visuals: smooth shader-drawn territory and trails, island and background, robots, eggs, balls, particles, camera |
 | `src/audio` | Synthesised sound effects and music (WebAudio, no files) |
 | `src/ui`, `src/input` | HUD, menus, settings/stats storage, swipe/keyboard/arrow controls |
