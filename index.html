@@ -16,6 +16,9 @@
       <div id="me"><div id="mePct">0%</div><div id="meHearts"></div></div>
       <div id="power" class="pill hidden"></div>
       <div id="toasts"></div>
+      <div id="gain" class="hidden"></div>
+      <div id="combo"></div>
+      <div id="coach" class="hidden"><div class="coach-text"></div><div class="coach-finger"></div><button id="coachSkip" class="btn small">Skip</button></div>
       <div id="thief-arrow" class="hidden"><div class="arrow"></div><span>Thief!</span></div>
       <div id="dpad" class="hidden">
         <button data-dir="0" class="up" aria-label="Up"></button>
@@ -33,14 +36,17 @@
       <div class="card title-card">
         <h1 class="logo" id="logo">Nestnappers</h1>
         <p class="tagline">Paint land. Steal eggs. Protect your nest!</p>
-        <div class="label">Map</div>
-        <div id="maps" class="maps"></div>
-        <div class="label">Colour</div>
-        <div id="colors" class="colors"></div>
         <button id="playBtn" class="btn big primary">Play</button>
-        <div class="row">
-          <button id="howBtn" class="btn">How to play</button>
-          <button id="settingsBtn" class="btn">Settings</button>
+        <div class="row tools">
+          <button id="customBtn" class="btn">Customize</button>
+          <button id="howBtn" class="btn round" aria-label="How to play">?</button>
+          <button id="settingsBtn" class="btn round" aria-label="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5A3.5 3.5 0 1 1 13 8.5a3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button>
+        </div>
+        <div id="customize" class="hidden">
+          <div class="label">Map</div>
+          <div id="maps" class="maps"></div>
+          <div class="label">Colour</div>
+          <div id="colors" class="colors"></div>
         </div>
         <div id="statsLine" class="stats-line"></div>
       </div>

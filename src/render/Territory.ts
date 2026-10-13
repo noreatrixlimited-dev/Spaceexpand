@@ -22,6 +22,7 @@ export class Territory {
   private readonly active = new Set<number>();
   private time = 0;
   private first = true;
+  private readonly uniforms: { uDangerId: { value: number }; uDanger: { value: number }; uTime: { value: number } };
 
   constructor(game: Game, theme: MapTheme) {
     const n = game.grid.size;
@@ -61,7 +62,11 @@ export class Territory {
       uP: { value: players },
       uS: { value: sides },
       uT: { value: trails },
+      uDangerId: { value: -1 },
+      uDanger: { value: 0 },
+      uTime: { value: 0 },
     };
+    this.uniforms = uniforms;
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader = shader.vertexShader
@@ -76,6 +81,7 @@ export class Territory {
           uniform float uTexel; uniform float uWorld;
           uniform vec3 uNeutral; uniform vec3 uPattern;
           uniform vec3 uP[4]; uniform vec3 uS[4]; uniform vec3 uT[4];
+          uniform float uDangerId; uniform float uDanger; uniform float uTime;
           // strongest channel and its value
           vec2 pick(vec4 v) {
             float id = 0.0; float m = v.r;
@@ -119,7 +125,13 @@ export class Territory {
           // trails: lighter ribbon in the player's colour
           vec2 tr = pick(soft(uTrail, uv));
           float tt = smoothstep(0.22, 0.42, tr.y);
-          col = mix(col, byId(uT, tr.x), tt * 0.92);
+          vec3 trailCol = byId(uT, tr.x);
+          // Your trail warns you: the riskier it gets, the redder and faster it pulses.
+          if (abs(tr.x - uDangerId) < 0.5 && uDanger > 0.01) {
+            float pulse = 0.5 + 0.5 * sin(uTime * (5.0 + 12.0 * uDanger));
+            trailCol = mix(trailCol, vec3(1.0, 0.25, 0.3), uDanger * (0.45 + 0.55 * pulse));
+          }
+          col = mix(col, trailCol, tt * 0.92);
           diffuseColor.rgb = col;
           diffuseColor.a = landA;`,
         );
@@ -127,6 +139,12 @@ export class Territory {
     mat.transparent = false;
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.receiveShadow = true;
+  }
+
+  /** Tint one player's trail by how risky it is (0..1). */
+  setDanger(pid: number | null, danger: number): void {
+    this.uniforms.uDangerId.value = pid ?? -1;
+    this.uniforms.uDanger.value = danger;
   }
 
   /** Delay newly claimed cells so the fill ripples out from (fx, fy) (cells). */
@@ -145,6 +163,7 @@ export class Territory {
 
   update(game: Game, dt: number, onPop?: (cell: number, owner: number) => void): void {
     this.time += dt;
+    this.uniforms.uTime.value = this.time;
     const g = game.grid;
     const N = g.owner.length;
     const own = this.own;

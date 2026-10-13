@@ -152,6 +152,16 @@ export class Sound {
     this.ride.filter.frequency.setTargetAtTime(700 + carve * 1500 + speed * 300, t, 0.08);
   }
 
+  /** Deep thump for land grabs; bigger grabs thump harder. */
+  thump(power: number): void {
+    this.tone(90, 0.28, { type: 'sine', vol: 0.25 + power * 0.25, slide: 0.45 });
+    this.noise(0.08, 0.06 + power * 0.08, 400);
+  }
+  heartbeat(intensity: number): void {
+    this.tone(60, 0.12, { type: 'sine', vol: 0.18 + intensity * 0.2, slide: 0.7 });
+    this.tone(55, 0.12, { type: 'sine', vol: 0.12 + intensity * 0.15, slide: 0.7, delay: 0.16 });
+  }
+
   whoosh(): void {
     this.noise(0.18, 0.12, 2400);
     this.tone(420, 0.16, { type: 'sine', vol: 0.12, slide: 1.8 });

@@ -239,15 +239,17 @@ export class Game {
     this.updateBalls(dt);
     this.updateProjectiles(dt);
     this.updateCores(dt);
-    this.updateVoid(dt);
-    this.updateStar(dt);
-    this.updatePickups(dt);
+    if (!this.opts.tutorial) {
+      this.updateVoid(dt);
+      this.updateStar(dt);
+      this.updatePickups(dt);
+    }
 
     this.grid.countOwned(this.land);
     for (const p of this.players) {
       if (this.land[p.id] > p.stats.peakLand) p.stats.peakLand = this.land[p.id];
     }
-    this.checkWin();
+    if (!this.opts.tutorial) this.checkWin();
   }
 
   speedOf(p: Player): number {
@@ -943,6 +945,12 @@ export class Game {
       if (best < 0 || this.land[c.owner] > this.land[best]) best = c.owner;
     }
     return best;
+  }
+
+  /** Cells the player would gain by closing their loop right now (trail + enclosed area). */
+  previewGain(pid: number): number {
+    if (!this.players[pid].trail.length) return 0;
+    return computeCapture(this.grid, pid, this.protectedCells(pid)).length;
   }
 
   /** Share of the original island a player owns, in percent. */

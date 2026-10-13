@@ -19,6 +19,9 @@ export class Hud {
   private readonly ammo = $('ammo');
   private readonly ammoCap = $('ammoCap');
   private readonly throwBtn = $('throwBtn');
+  private readonly gainEl = $('gain');
+  private readonly comboEl = $('combo');
+  private gainTimer = 0;
   private rows: HTMLElement[] = [];
   private lastTimerText = '';
   private boardTimer = 0;
@@ -42,6 +45,8 @@ export class Hud {
     this.toasts.innerHTML = '';
     this.arrow.classList.add('hidden');
     this.power.classList.add('hidden');
+    this.gainEl.classList.add('hidden');
+    this.comboEl.innerHTML = '';
     this.boardTimer = 0;
     this.update(game, human, null, 1);
   }
@@ -53,6 +58,17 @@ export class Hud {
     this.toasts.appendChild(t);
     while (this.toasts.children.length > 3) this.toasts.firstElementChild?.remove();
     window.setTimeout(() => t.remove(), 2500);
+  }
+
+  /** Big centre pop for combos ("Double grab!"). */
+  combo(text: string, color: string): void {
+    const el = document.createElement('div');
+    el.className = 'combo-pop';
+    el.style.setProperty('--c', color);
+    el.textContent = text;
+    this.comboEl.appendChild(el);
+    while (this.comboEl.children.length > 2) this.comboEl.firstElementChild?.remove();
+    window.setTimeout(() => el.remove(), 1500);
   }
 
   countdown(text: string): void {
@@ -104,6 +120,24 @@ export class Hud {
           : core.state === 'carried'
             ? '<span class="status">your egg was stolen!</span>'
             : [0, 1, 2].map((i) => `<span class="heart${i < core.hearts ? '' : ' off'}"></span>`).join('');
+    }
+
+    // Live "+x%" over your robot: what closing the loop right now would earn.
+    this.gainTimer -= dt;
+    if (this.gainTimer <= 0) {
+      this.gainTimer = 0.3;
+      const gain = p.status === 'alive' ? game.previewGain(human) : 0;
+      const pct = (gain / game.totalCells) * 100;
+      this.gainEl.classList.toggle('hidden', gain <= 0);
+      if (gain > 0) {
+        this.gainEl.textContent = `+${pct < 1 ? pct.toFixed(1) : pct.toFixed(0)}%`;
+        this.gainEl.classList.toggle('juicy', pct >= 3);
+      }
+    }
+    if (camera && !this.gainEl.classList.contains('hidden')) {
+      const v = new THREE.Vector3((p.px - game.grid.size / 2) / UNIT, 2.3, (p.py - game.grid.size / 2) / UNIT).project(camera);
+      this.gainEl.style.left = `${((v.x + 1) / 2) * window.innerWidth}px`;
+      this.gainEl.style.top = `${((1 - v.y) / 2) * window.innerHeight}px`;
     }
 
     const ammo = p.status === 'shade' ? 0 : p.balls;

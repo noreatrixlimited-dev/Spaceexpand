@@ -14,6 +14,17 @@ Every push builds an APK on GitHub Actions and publishes it as a **GitHub releas
 
 The APK is signed with a debug key, which is fine for sideloading. A Play Store release needs your own signing key (see the plan).
 
+## First time?
+Press **Play** and a 30-second guided ride teaches you as you go: ride out, ride back home, throw a ball. After that you play a real match.
+
+The game shows rather than tells:
+- your trail pulses and turns red as it gets risky (with a heartbeat sound),
+- a "+x%" above your robot shows what you'd gain by closing the loop now,
+- an arrow points home when you're far out,
+- a ring under you means a throw is ready.
+
+Combo pop-ups celebrate big moments: Double grab!, Huge grab!, Revenge!, Trail hunter!, Egg thief! and Nest captured! After a match, the next one starts by itself in 5 seconds (or tap Menu).
+
 ## How to play
 - **Ride:** drag anywhere on the screen (a joystick appears under your finger). Your robot rides a board like a snowboard: it builds up speed from a stop, carves smooth turns while leaning into them, throws snow spray, and slows a little in hard turns. On a keyboard, use WASD/arrows (8 directions).
 - **Paint:** leave your land to draw a trail, then return home to claim the trail and everything it encloses.

@@ -69,6 +69,8 @@ export interface MatchOptions {
   humanSlot: number | null; // null = attract mode, all bots
   difficulty: Difficulty;
   seed: number;
+  /** Guided first ride: no shrinking, no star or pickups, no winner. */
+  tutorial?: boolean;
 }
 
 export const PLAYER_NAMES = ['Grape', 'Cherry', 'Berry', 'Lime'];

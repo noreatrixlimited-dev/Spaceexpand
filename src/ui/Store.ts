@@ -12,6 +12,7 @@ export interface Settings {
   seenHowTo: boolean;
   artVersion?: number;
   map: string;
+  tutorialDone: boolean;
 }
 
 export interface Stats {
@@ -40,6 +41,7 @@ const defaults = (): { settings: Settings; stats: Stats } => ({
     vibrate: true,
     seenHowTo: false,
     map: 'classic',
+    tutorialDone: false,
   },
   stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '' },
 });

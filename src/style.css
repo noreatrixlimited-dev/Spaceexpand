@@ -1057,3 +1057,121 @@ h2 {
   position: relative;
   overflow: hidden;
 }
+
+/* live gain label over the player */
+#gain {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(60, 70, 110, 0.55);
+  padding: 2px 10px;
+  border-radius: 12px;
+  pointer-events: none;
+  transition: transform 0.15s;
+}
+#gain.juicy {
+  background: linear-gradient(180deg, #ffd43b, #ff9f1c);
+  color: #5a3200;
+  transform: translate(-50%, -100%) scale(1.15);
+}
+/* combo pops */
+#combo {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 38%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+.combo-pop {
+  font-size: 38px;
+  font-weight: 700;
+  color: var(--c);
+  -webkit-text-stroke: 2px #fff;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.15), 0 8px 24px rgba(0, 0, 0, 0.18);
+  animation: combo 1.5s cubic-bezier(0.2, 1.6, 0.4, 1) forwards;
+}
+@keyframes combo {
+  0% { transform: scale(0.3) rotate(-8deg); opacity: 0; }
+  15% { transform: scale(1.15) rotate(3deg); opacity: 1; }
+  25% { transform: scale(1) rotate(0); }
+  80% { opacity: 1; }
+  100% { transform: translateY(-30px) scale(0.95); opacity: 0; }
+}
+/* guided first ride */
+#coach {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 22%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+.coach-text {
+  font-size: 26px;
+  font-weight: 700;
+  color: #fff;
+  text-align: center;
+  padding: 10px 18px;
+  border-radius: 20px;
+  background: rgba(60, 70, 110, 0.6);
+  max-width: 86vw;
+  animation: pop-in 0.35s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.coach-finger {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 10px rgba(255, 255, 255, 0.3);
+  margin-top: 18vh;
+  animation: drag 1.6s ease-in-out infinite;
+}
+.coach-finger.tap {
+  animation: tap 1s ease-in-out infinite;
+  margin-top: 0;
+  position: fixed;
+  right: 34px;
+  bottom: 42px;
+}
+@keyframes drag {
+  0% { transform: translate(-60px, 0); opacity: 0; }
+  20% { opacity: 1; }
+  80% { transform: translate(60px, -40px); opacity: 1; }
+  100% { transform: translate(60px, -40px); opacity: 0; }
+}
+@keyframes tap {
+  50% { transform: scale(0.8); box-shadow: 0 0 0 18px rgba(255, 255, 255, 0.15); }
+}
+#coachSkip {
+  pointer-events: auto;
+  position: fixed;
+  top: calc(60px + var(--safe-top));
+  left: calc(10px + var(--safe-left));
+  font-size: 14px;
+  padding: 6px 12px;
+}
+
+/* one-tap title */
+.title-card .btn.big {
+  font-size: 32px;
+  padding: 18px;
+}
+.row.tools .btn.round {
+  flex: 0 0 52px;
+  padding: 10px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#customize {
+  margin-top: 10px;
+  animation: pop-in 0.25s ease;
+}

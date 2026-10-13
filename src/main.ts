@@ -10,7 +10,7 @@ import { Capacitor } from '@capacitor/core';
 import { Bots } from './ai/Bot';
 import { Director, pickMood } from './ai/Director';
 import { Sound } from './audio/Sound';
-import { CONFIG, PLAYER_COLORS, type MatchOptions } from './config';
+import { CONFIG, PLAYER_COLORS, UNIT, type MatchOptions } from './config';
 import { MAPS } from './maps';
 import { Game, type GameEvent } from './core/Game';
 import { Input } from './input/Input';
@@ -31,6 +31,9 @@ const input = new Input($('scene'), $('dpad'), $('joy'), $('throwBtn'));
 
 let game: Game;
 let director: Director | null = null;
+let combo = { lastCapture: -99, bonkedBy: -1, bonkedAt: -99, cuts: 0 };
+let heartbeatTimer = 0;
+let replayLeft = -1; // seconds until the next match starts by itself on the results screen
 let phase: Phase = 'menu';
 let human: number | null = null;
 let accumulator = 0;
@@ -107,7 +110,7 @@ function updateStatsLine(): void {
   const s = store.stats;
   $('statsLine').textContent = s.games
     ? `Wins ${s.wins} / ${s.games} games  ·  Best land ${s.bestLandPct}%  ·  Eggs nabbed ${s.eggsCaptured}`
-    : 'Tip: swipe to steer your blob!';
+    : 'Tip: drag to ride, tap to throw!';
 }
 
 function syncSettingsUI(): void {
@@ -135,8 +138,9 @@ function applySettings(): void {
 
 // ---------- matches ----------
 
-function newGame(humanSlot: number | null): void {
+function newGame(humanSlot: number | null, tutorial = false): void {
   const opts: MatchOptions = {
+    tutorial,
     map: store.settings.map,
     startMode: store.settings.startMode,
     hardMode: store.settings.hardMode,
@@ -145,9 +149,19 @@ function newGame(humanSlot: number | null): void {
     seed: (Math.random() * 1e9) | 0,
   };
   game = new Game(opts);
-  const bots = new Bots(game, 0.5);
-  // No difficulty menu: the director picks how kind the bots are from recent results.
-  director = humanSlot === null ? null : new Director(game, bots, humanSlot, pickMood(store.stats.recent));
+  director = null;
+  if (!tutorial) {
+    const bots = new Bots(game, 0.5);
+    // No difficulty menu: the director picks how kind the bots are from recent results.
+    if (humanSlot !== null) director = new Director(game, bots, humanSlot, pickMood(store.stats.recent));
+  }
+  combo = { lastCapture: -99, bonkedBy: -1, bonkedAt: -99, cuts: 0 };
+  if (!tutorial) {
+    tutorialStep = -1;
+    coach.classList.add('hidden');
+    world.forceHomeArrow = false;
+  }
+  replayLeft = -1;
   human = humanSlot;
   world.setGame(game);
   world.mode = humanSlot === null ? 'orbit' : 'follow';
@@ -180,6 +194,89 @@ function startMatch(): void {
   applySettings();
 }
 
+// ---------- guided first ride ----------
+
+let tutorialStep = -1;
+let tutorialTimer = 0;
+const coach = $('coach');
+const coachText = coach.querySelector('.coach-text') as HTMLElement;
+const coachFinger = coach.querySelector('.coach-finger') as HTMLElement;
+
+function setCoach(text: string, finger: 'drag' | 'tap' | 'none'): void {
+  coachText.textContent = text;
+  // restart the pop animation
+  coachText.style.animation = 'none';
+  void coachText.offsetWidth;
+  coachText.style.animation = '';
+  coachFinger.style.display = finger === 'none' ? 'none' : '';
+  coachFinger.classList.toggle('tap', finger === 'tap');
+}
+
+function startTutorial(): void {
+  sound.unlock();
+  sound.startMusic();
+  newGame(store.settings.slot, true);
+  showScreen(null);
+  hud.show(true);
+  phase = 'playing';
+  input.enabled = true;
+  input.reset();
+  applySettings();
+  tutorialStep = 0;
+  tutorialTimer = 0;
+  coach.classList.remove('hidden');
+  setCoach('Drag to ride out!', 'drag');
+}
+
+function endTutorial(): void {
+  tutorialStep = -1;
+  coach.classList.add('hidden');
+  world.forceHomeArrow = false;
+  store.settings.tutorialDone = true;
+  store.save();
+  startMatch();
+}
+
+/** Advance the first ride from what the player actually does. */
+function tutorialProgress(events: GameEvent[]): void {
+  if (tutorialStep < 0 || human === null) return;
+  const me = game.players[human];
+  if (tutorialStep === 0 && me.trail.length >= 4 * UNIT) {
+    tutorialStep = 1;
+    world.forceHomeArrow = true;
+    setCoach('Now ride back home!', 'none');
+  }
+  for (const e of events) {
+    if (tutorialStep === 1 && e.type === 'capture' && e.pid === human) {
+      tutorialStep = 2;
+      world.forceHomeArrow = false;
+      me.balls = Math.max(me.balls, 3);
+      hud.combo('Land grabbed!', PLAYER_COLORS[human]);
+      setCoach('Tap to throw a paint ball!', 'tap');
+    } else if (tutorialStep === 2 && e.type === 'throw' && e.pid === human) {
+      tutorialStep = 3;
+      tutorialTimer = 1.6;
+      setCoach('Splat! Balls paint land and stun riders.', 'none');
+    }
+  }
+}
+
+function tutorialTick(dt: number): void {
+  if (tutorialStep < 3) return;
+  tutorialTimer -= dt;
+  if (tutorialTimer > 0) return;
+  if (tutorialStep === 3) {
+    tutorialStep = 4;
+    tutorialTimer = 2.2;
+    setCoach('Now grab the island and steal their eggs!', 'none');
+  } else endTutorial();
+}
+
+$('coachSkip').onclick = () => {
+  sound.click();
+  endTutorial();
+};
+
 function pause(): void {
   if (phase !== 'playing' && phase !== 'countdown') return;
   phase = 'paused';
@@ -203,6 +300,7 @@ function nameOf(id: number): string {
 function handleEvents(events: GameEvent[]): void {
   world.handleEvents(events, human);
   if (phase === 'menu') return; // attract mode is silent
+  tutorialProgress(events);
   const me = human;
   for (const e of events) {
     switch (e.type) {
@@ -211,8 +309,14 @@ function handleEvents(events: GameEvent[]): void {
         break;
       case 'capture':
         if (e.pid === me) {
-          sound.capture(e.cells.length);
-          if (e.cells.length >= 40) hud.toast(`Huge grab! +${e.cells.length}`);
+          const pct = (e.cells.length / game.totalCells) * 100;
+          sound.capture(e.cells.length / (UNIT * UNIT));
+          sound.thump(Math.min(1, pct / 6));
+          world.kickCamera(Math.min(1, 0.25 + pct / 6));
+          vibrate(pct >= 3 ? 60 : 20);
+          if (game.time - combo.lastCapture < 6) hud.combo('Double grab!', '#ff9f1c');
+          else if (pct >= 4) hud.combo(`Huge grab! +${pct.toFixed(0)}%`, PLAYER_COLORS[me]);
+          combo.lastCapture = game.time;
         }
         break;
       case 'bonk':
@@ -220,11 +324,20 @@ function handleEvents(events: GameEvent[]): void {
           sound.bonk();
           vibrate(120);
           hud.toast(e.by === me ? 'Oops! Bonked by your own trail' : e.by === e.victim ? 'Swallowed by the clouds!' : `${nameOf(e.by)} cut your trail!`);
+          if (e.by !== me && e.by !== e.victim) {
+            combo.bonkedBy = e.by;
+            combo.bonkedAt = game.time;
+          }
         } else if (e.by === me) {
           sound.squeak();
           vibrate(30);
-          hud.toast(`You bonked ${nameOf(e.victim)}!`);
           store.stats.trailsCut++;
+          combo.cuts++;
+          if (e.victim === combo.bonkedBy && game.time - combo.bonkedAt < 25) {
+            hud.combo('Revenge!', '#e8436f');
+            combo.bonkedBy = -1;
+          } else if (combo.cuts === 3) hud.combo('Trail hunter!', '#7048e8');
+          else hud.toast(`You bonked ${nameOf(e.victim)}!`);
         }
         break;
       case 'shielded':
@@ -246,8 +359,10 @@ function handleEvents(events: GameEvent[]): void {
         if (e.owner === me) {
           vibrate(200);
           hud.toast(`${nameOf(e.by)} stole your egg! Bump them!`, true);
-        } else if (e.by === me) hud.toast('Got the egg! Run home!', true);
-        else hud.toast(`${nameOf(e.by)} nabbed ${nameOf(e.owner)}'s egg!`);
+        } else if (e.by === me) {
+          hud.combo('Egg thief!', '#f08c00');
+          hud.toast('Run home with it!');
+        } else hud.toast(`${nameOf(e.by)} nabbed ${nameOf(e.owner)}'s egg!`);
         break;
       case 'eggDropped':
         sound.drop();
@@ -259,7 +374,8 @@ function handleEvents(events: GameEvent[]): void {
         sound.bigCapture();
         if (e.by === me) {
           store.stats.eggsCaptured++;
-          hud.toast(`You captured ${nameOf(e.owner)}'s nest!`, true);
+          hud.combo('Nest captured!', PLAYER_COLORS[me!]);
+          world.kickCamera(1);
         } else if (e.owner === me) {
           vibrate(300);
           hud.toast("You're a ghost! Touch another nest to break free", true);
@@ -378,15 +494,14 @@ input.onPause = () => (phase === 'paused' ? resume() : pause());
 $('playBtn').onclick = () => {
   sound.unlock();
   sound.click();
-  if (!store.settings.seenHowTo) {
-    store.settings.seenHowTo = true;
-    store.save();
-    returnTo = 'title';
-    showScreen('howto');
-    ($('howto').querySelector('.back') as HTMLElement).dataset.then = 'play';
-    return;
-  }
-  startMatch();
+  // First time: a guided 30-second ride instead of a rules screen.
+  if (!store.settings.tutorialDone && store.stats.games === 0) startTutorial();
+  else startMatch();
+};
+$('customBtn').onclick = () => {
+  sound.unlock();
+  sound.click();
+  $('customize').classList.toggle('hidden');
 };
 $('howBtn').onclick = () => {
   sound.unlock();
@@ -468,11 +583,15 @@ $('quitBtn').onclick = () => {
   sound.click();
   startAttract();
 };
-$('againBtn').onclick = () => {
+const againBtn = $<HTMLButtonElement>('againBtn');
+againBtn.onclick = () => {
+  replayLeft = -1;
   sound.click();
   startMatch();
 };
 $('menuBtn').onclick = () => {
+  replayLeft = -1;
+  againBtn.textContent = 'Play again';
   sound.click();
   startAttract();
 };
@@ -548,7 +667,16 @@ function loop(now: number): void {
     if (countdownLeft <= 0.2) phase = 'playing';
   }
 
-  if (phase === 'playing') director?.update(dt);
+  if (phase === 'playing') {
+    director?.update(dt);
+    tutorialTick(dt);
+    // Heartbeat when your trail is in danger.
+    heartbeatTimer -= dt;
+    if (world.danger > 0.55 && heartbeatTimer <= 0) {
+      sound.heartbeat(world.danger);
+      heartbeatTimer = 0.95 - world.danger * 0.45;
+    }
+  }
   if (phase === 'playing' || phase === 'menu' || phase === 'over') {
     const step = 1 / CONFIG.tickRate;
     accumulator += dt;
@@ -565,11 +693,27 @@ function loop(now: number): void {
     if (phase === 'menu' && game.over) newGame(null);
   }
 
+  // Quick replay: the next match starts by itself unless the player heads to the menu.
+  if (replayLeft > 0 && phase === 'over' && !$('results').classList.contains('hidden')) {
+    const before = Math.ceil(replayLeft);
+    replayLeft -= dt;
+    const n = Math.ceil(replayLeft);
+    if (n !== before || !againBtn.dataset.count) {
+      againBtn.dataset.count = String(n);
+      againBtn.textContent = `Play again (${Math.max(0, n)})`;
+    }
+    if (replayLeft <= 0) {
+      replayLeft = -1;
+      startMatch();
+    }
+  }
   if (phase === 'over') {
     overTimer -= dt;
     if (overTimer <= 0 && $('results').classList.contains('hidden')) {
       showScreen('results');
       hud.show(false);
+      replayLeft = 5;
+      againBtn.textContent = 'Play again (5)';
     }
   }
 

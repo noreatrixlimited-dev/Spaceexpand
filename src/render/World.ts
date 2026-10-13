@@ -45,6 +45,17 @@ export class World {
   private time = 0;
   private starScale = 0;
   private half = 20;
+  // Cues for the human player: throw-ready ring, home arrow, trail danger.
+  private readonly readyRing: THREE.Mesh;
+  private readonly homeArrow: THREE.Mesh;
+  private homeTarget: { x: number; y: number } | null = null;
+  private homeTimer = 0;
+  private humanId: number | null = null;
+  /** 0..1: how risky the human's trail is right now (drives the red pulse and heartbeat). */
+  danger = 0;
+  /** Force the home arrow on (tutorial). */
+  forceHomeArrow = false;
+  private punch = 0;
   mode: CameraMode = 'orbit';
   followId = 0;
   zoom = 1;
@@ -74,7 +85,27 @@ export class World {
     this.starMesh = new THREE.Mesh(starGeometry(0.42, 0.19, 0.16), toon('#ffd43b', { emissive: '#ffb703', emissiveIntensity: 0.35 }));
     this.starMesh.castShadow = true;
     this.starMesh.visible = false;
-    this.scene.add(this.matchGroup, this.particles.mesh, this.starMesh);
+    this.readyRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.78, 0.92, 40),
+      new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.8, depthWrite: false }),
+    );
+    this.readyRing.rotation.x = -Math.PI / 2;
+    this.readyRing.renderOrder = 2;
+    const chevron = new THREE.Shape();
+    chevron.moveTo(0, 0.55);
+    chevron.lineTo(0.42, -0.2);
+    chevron.lineTo(0.14, -0.1);
+    chevron.lineTo(0.14, -0.5);
+    chevron.lineTo(-0.14, -0.5);
+    chevron.lineTo(-0.14, -0.1);
+    chevron.lineTo(-0.42, -0.2);
+    chevron.closePath();
+    const arrowGeo = new THREE.ShapeGeometry(chevron);
+    arrowGeo.rotateX(-Math.PI / 2);
+    this.homeArrow = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9, depthWrite: false }));
+    this.homeArrow.renderOrder = 3;
+    this.readyRing.visible = this.homeArrow.visible = false;
+    this.scene.add(this.matchGroup, this.particles.mesh, this.starMesh, this.readyRing, this.homeArrow);
     this.buildPost();
     this.resize();
   }
@@ -170,6 +201,9 @@ export class World {
       this.eggs.push(egg);
       this.matchGroup.add(egg.nest, egg.egg);
     }
+    this.humanId = game.opts.humanSlot;
+    this.homeTarget = null;
+    this.danger = 0;
     this.lastHeading = game.players.map((p) => p.heading);
     this.turnVis = [0, 0, 0, 0];
     this.balls = new BallsView(game.grid.size);
@@ -352,6 +386,7 @@ export class World {
         egg.update(dt, this.time, c.hearts);
       }
       this.balls?.update(game, this.avatarPos, this.time);
+      this.updateCues(game, dt);
 
       const want = game.star.active ? 1 : 0;
       this.starScale += (want - this.starScale) * Math.min(1, dt * 8);
@@ -368,6 +403,77 @@ export class World {
     this.updateCamera(dt);
     if (this.post) this.post.render(dt);
     else this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Small zoom "punch" for satisfying moments (big land grabs). */
+  kickCamera(amount: number): void {
+    this.punch = Math.max(this.punch, amount);
+  }
+
+  private updateCues(game: Game, dt: number): void {
+    const id = this.humanId;
+    const p = id === null ? null : game.players[id];
+    if (!p || !this.territory || p.status !== 'alive' || game.over) {
+      this.readyRing.visible = this.homeArrow.visible = false;
+      this.territory?.setDanger(null, 0);
+      this.danger = 0;
+      return;
+    }
+    const pos = this.avatarPos[p.id];
+    const U = UNIT;
+    // Throw-ready ring under your robot.
+    const ready = p.balls > 0 && p.throwCooldown <= 0 && p.stunTimer <= 0;
+    this.readyRing.visible = ready;
+    if (ready) {
+      this.readyRing.position.set(pos.x, 0.03, pos.z);
+      this.readyRing.scale.setScalar(1 + Math.sin(this.time * 5) * 0.05);
+      (this.readyRing.material as THREE.MeshBasicMaterial).opacity = 0.45 + Math.sin(this.time * 5) * 0.2;
+    }
+    // How risky is the trail? Long trails and nearby enemies both raise it.
+    let want = 0;
+    if (p.trail.length) {
+      want = Math.min(1, p.trail.length / (14 * U)) * 0.8;
+      let near = Infinity;
+      for (const q of game.players) {
+        if (q === p || q.status === 'bonked' || (q.status === 'shade' && q.shadeOf === p.id)) continue;
+        for (let k = 0; k < p.trail.length; k += 3) {
+          const c = p.trail[k];
+          near = Math.min(near, Math.hypot((c % game.grid.size) - q.px, Math.floor(c / game.grid.size) - q.py));
+        }
+      }
+      want = Math.max(want, 1 - Math.min(1, Math.max(0, near - U) / (5 * U)));
+    }
+    this.danger += (want - this.danger) * Math.min(1, dt * 4);
+    this.territory.setDanger(p.id, this.danger);
+
+    // Arrow pointing home when you're out on a trail.
+    const showArrow = p.trail.length > 0 && (this.forceHomeArrow || p.trail.length > 4 * U || this.danger > 0.5);
+    this.homeTimer -= dt;
+    if (showArrow && (this.homeTimer <= 0 || !this.homeTarget)) {
+      this.homeTimer = 0.2;
+      const g = game.grid;
+      let best = Infinity;
+      this.homeTarget = null;
+      for (let i = 0; i < g.owner.length; i++) {
+        if (g.owner[i] !== p.id) continue;
+        const x = i % g.size;
+        const y = (i - x) / g.size;
+        const d = (x + 0.5 - p.px) ** 2 + (y + 0.5 - p.py) ** 2;
+        if (d < best) {
+          best = d;
+          this.homeTarget = { x: x + 0.5, y: y + 0.5 };
+        }
+      }
+    }
+    this.homeArrow.visible = showArrow && this.homeTarget !== null;
+    if (this.homeArrow.visible && this.homeTarget) {
+      const a = Math.atan2(this.homeTarget.y - p.py, this.homeTarget.x - p.px);
+      const r = 1.5 + Math.sin(this.time * 6) * 0.12;
+      this.homeArrow.position.set(pos.x + Math.cos(a) * r, 0.06, pos.z + Math.sin(a) * r);
+      this.homeArrow.rotation.y = -a - Math.PI / 2;
+      const m = this.homeArrow.material as THREE.MeshBasicMaterial;
+      m.color.set('#ffffff').lerp(new THREE.Color('#ff3b5c'), this.danger);
+    }
   }
 
   private updateCamera(dt: number): void {
@@ -388,7 +494,8 @@ export class World {
       // Look a little ahead of where we're going.
       if (p.moving) desired.add(new THREE.Vector3(Math.cos(p.heading), 0, Math.sin(p.heading)).multiplyScalar(1.6));
       const across = aspect < 1 ? 13 / 2 / halfW : 16 / 2 / halfH;
-      dist = Math.max(12, across) / this.zoom;
+      this.punch = Math.max(0, this.punch - dt * 1.5);
+      dist = (Math.max(12, across) / this.zoom) * (1 - this.punch * 0.08);
     } else {
       desired = new THREE.Vector3(0, 0, 0);
       const span = (game ? game.map.size : 20) + 2.5;
