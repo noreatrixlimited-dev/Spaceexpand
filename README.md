@@ -15,7 +15,7 @@ Every push builds an APK on GitHub Actions and publishes it as a **GitHub releas
 The APK is signed with a debug key, which is fine for sideloading. A Play Store release needs your own signing key (see the plan).
 
 ## How to play
-- **Steer:** drag anywhere on the screen (a joystick appears under your finger). Your character glides freely in any direction. On a keyboard, use WASD/arrows (8 directions).
+- **Ride:** drag anywhere on the screen (a joystick appears under your finger). Your robot rides a board like a snowboard: it builds up speed from a stop, carves smooth turns while leaning into them, throws snow spray, and slows a little in hard turns. On a keyboard, use WASD/arrows (8 directions).
 - **Paint:** leave your land to draw a trail, then return home to claim the trail and everything it encloses.
 - **Throw:** tap the screen, press the ball button, or press Space. The ball auto-aims at an enemy, trail or nest near where you're facing.
   - A splash paints a patch of land in your colour.

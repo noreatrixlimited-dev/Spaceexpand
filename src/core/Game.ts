@@ -21,6 +21,10 @@ export interface Player {
   aim: number | null; // direction the player wants to face
   moving: boolean;
   stunTimer: number;
+  /** Board momentum 0..1: builds up from a stop. */
+  glide: number;
+  /** How hard the player is turning right now (radians/second, signed) — used for leaning. */
+  turn: number;
   status: PlayerStatus;
   bonkTimer: number;
   trail: number[];
@@ -163,6 +167,8 @@ export class Game {
         aim: null,
         moving: false,
         stunTimer: 0,
+        glide: 0,
+        turn: 0,
         status: 'alive',
         bonkTimer: 0,
         trail: [],
@@ -262,17 +268,28 @@ export class Game {
     }
     if (p.stunTimer > 0) {
       p.stunTimer -= dt;
+      p.glide = 0;
+      p.turn = 0;
       return;
     }
     if (!p.moving && this.onArrive && !p.isHuman) this.onArrive(p);
-    if (!p.moving) return;
+    if (!p.moving) {
+      p.turn = 0;
+      return;
+    }
 
+    // Board riding: carve toward the aim, build up glide from a stop, lose a little speed in hard turns.
+    let turned = 0;
     if (p.aim !== null) {
       const diff = wrapAngle(p.aim - p.heading);
       const max = CONFIG.turnRate * dt;
-      p.heading = wrapAngle(p.heading + Math.max(-max, Math.min(max, diff)));
+      turned = Math.max(-max, Math.min(max, diff));
+      p.heading = wrapAngle(p.heading + turned);
     }
-    let dist = this.speedOf(p) * dt;
+    p.turn = turned / dt;
+    p.glide = Math.min(1, p.glide + dt / CONFIG.glideRamp);
+    const carve = Math.min(1, Math.abs(p.turn) / CONFIG.turnRate);
+    let dist = this.speedOf(p) * dt * (0.35 + 0.65 * p.glide) * (1 - CONFIG.carveSlow * carve);
     while (dist > 1e-6) {
       const step = Math.min(0.25, dist);
       dist -= step;
@@ -469,6 +486,8 @@ export class Game {
     p.moving = false;
     p.aim = null;
     p.stunTimer = 0;
+    p.glide = 0;
+    p.turn = 0;
   }
 
   private hitCore(c: Core, p: Player): void {

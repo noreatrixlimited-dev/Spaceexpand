@@ -67,6 +67,18 @@ export class Particles {
     }
   }
 
+  /** Snow spray kicked sideways off the board when carving. */
+  spray(pos: THREE.Vector3, side: THREE.Vector3, amount: number): void {
+    const v = new THREE.Vector3();
+    for (let k = 0; k < amount; k++) {
+      v.copy(side).multiplyScalar(1 + Math.random() * 1.6);
+      v.x += (Math.random() - 0.5) * 0.8;
+      v.z += (Math.random() - 0.5) * 0.8;
+      v.y = 0.8 + Math.random() * 1.2;
+      this.spawn(pos, v, Math.random() < 0.5 ? '#ffffff' : '#e3efff', 0.05 + Math.random() * 0.05, 0.35 + Math.random() * 0.25, 5);
+    }
+  }
+
   confetti(pos: THREE.Vector3, count = 60): void {
     const colors = ['#ff7b7b', '#5ab8ff', '#4fd6a0', '#a98bf0', '#ffd43b', '#ff9ed2'];
     const v = new THREE.Vector3();

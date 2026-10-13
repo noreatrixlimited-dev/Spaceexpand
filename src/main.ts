@@ -583,6 +583,12 @@ function loop(now: number): void {
     }
   }
 
+  // Board hiss follows the player's own riding.
+  if (human !== null && phase === 'playing') {
+    const me = game.players[human];
+    const riding = me.moving && me.status === 'alive' && me.stunTimer <= 0;
+    sound.setRide(riding ? me.glide : 0, Math.min(1, Math.abs(me.turn) / CONFIG.turnRate));
+  } else sound.setRide(0, 0);
   world.frame(dt);
   if (phase !== 'menu') hud.update(game, human, world.camera, dt);
   requestAnimationFrame(loop);

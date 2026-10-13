@@ -31,6 +31,7 @@ export class Blob {
   moving = false;
   carrying = false;
   ghostColor: string | null = null;
+  lean = 0; // unused by blobs; keeps the avatar interface shared
 
   constructor(id: number, isHuman: boolean) {
     this.color = PLAYER_COLORS[id];

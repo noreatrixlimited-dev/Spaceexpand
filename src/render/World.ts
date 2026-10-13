@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLAYER_COLORS, UNIT } from '../config';
+import { CONFIG, PLAYER_COLORS, UNIT } from '../config';
 import type { Game, GameEvent } from '../core/Game';
 import { BallsView } from './BallsView';
 import { Blob } from './Blob';
@@ -35,6 +35,9 @@ export class World {
   private quality: Quality;
   private eggs: EggView[] = [];
   private avatarPos: THREE.Vector3[] = [];
+  private sprayAcc = [0, 0, 0, 0];
+  private lastHeading = [0, 0, 0, 0];
+  private turnVis = [0, 0, 0, 0];
   private nestPos: THREE.Vector3[] = [];
   private camTarget = new THREE.Vector3();
   private camPos = new THREE.Vector3(0, 40, 30);
@@ -167,6 +170,8 @@ export class World {
       this.eggs.push(egg);
       this.matchGroup.add(egg.nest, egg.egg);
     }
+    this.lastHeading = game.players.map((p) => p.heading);
+    this.turnVis = [0, 0, 0, 0];
     this.balls = new BallsView(game.grid.size);
     this.matchGroup.add(this.balls.group);
     this.starScale = 0;
@@ -304,7 +309,31 @@ export class World {
         b.carrying = p.carrying >= 0;
         b.crowned = leader === p.id && p.status !== 'shade';
         b.shielded = p.shield;
+        // Lean from how fast the heading is actually changing (works for bots and players).
+        let dh = p.heading - this.lastHeading[p.id];
+        while (dh > Math.PI) dh -= Math.PI * 2;
+        while (dh < -Math.PI) dh += Math.PI * 2;
+        this.lastHeading[p.id] = p.heading;
+        const rate = dt > 0 ? dh / dt : 0;
+        this.turnVis[p.id] += (rate - this.turnVis[p.id]) * Math.min(1, dt * 8);
+        b.lean = this.turnVis[p.id] / CONFIG.turnRate;
         b.update(dt, this.time);
+        // Snow spray off the board: a light dusting while gliding, a burst when carving hard.
+        if (b.moving && p.status === 'alive') {
+          const carve = Math.min(1, Math.abs(b.lean));
+          this.sprayAcc[p.id] += dt * (5 + carve * 45) * p.glide;
+          const n = Math.floor(this.sprayAcc[p.id]);
+          if (n > 0) {
+            this.sprayAcc[p.id] -= n;
+            const fx = Math.cos(p.heading);
+            const fz = Math.sin(p.heading);
+            // outside of the turn: right turns throw snow to the left, and vice versa
+            const s = b.lean >= 0 ? -1 : 1;
+            const side = new THREE.Vector3(-fz * s, 0, fx * s).multiplyScalar(0.6 + carve).addScaledVector(new THREE.Vector3(-fx, 0, -fz), 0.5);
+            const tail = cur.clone().add(new THREE.Vector3(-fx * 0.45, 0.12, -fz * 0.45));
+            this.particles.spray(tail, side, n);
+          }
+        }
 
         const c = game.cores[p.id];
         const egg = this.eggs[p.id];

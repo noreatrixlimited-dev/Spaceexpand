@@ -118,6 +118,40 @@ export class Sound {
     this.tone(784, 0.12, { type: 'triangle', vol: 0.18 });
     this.tone(1046, 0.18, { type: 'triangle', vol: 0.18, delay: 0.09 });
   }
+  private ride: { src: AudioBufferSourceNode; filter: BiquadFilterNode; gain: GainNode } | null = null;
+
+  /** Continuous board sound: a soft snowy hiss that swells when carving. */
+  setRide(speed: number, carve: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.sfxGain) return;
+    if (!this.ride) {
+      const len = ctx.sampleRate * 2;
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < len; i++) {
+        last = last * 0.92 + (Math.random() * 2 - 1) * 0.08; // brown-ish noise
+        d[i] = last * 3;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.Q.value = 0.7;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.sfxGain);
+      src.start();
+      this.ride = { src, filter, gain };
+    }
+    const t = ctx.currentTime;
+    this.ride.gain.gain.setTargetAtTime(speed * (0.05 + carve * 0.16), t, 0.08);
+    this.ride.filter.frequency.setTargetAtTime(700 + carve * 1500 + speed * 300, t, 0.08);
+  }
+
   whoosh(): void {
     this.noise(0.18, 0.12, 2400);
     this.tone(420, 0.16, { type: 'sine', vol: 0.12, slide: 1.8 });
