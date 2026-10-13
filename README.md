@@ -2,7 +2,9 @@
 
 *Paint land. Steal eggs. Protect your nest!*
 
-A cute, toy-like 3D game for 4 players (you + 3 bots). Each blob starts in a corner of a floating cookie island with a pet egg in its nest. Paint flower trails to grab land, cut other players' trails, and steal their eggs.
+A cute 3D territory game in the style of Paper.io, for 4 players (you + 3 bots). Each toy robot starts near the edge of a floating island with a pet egg in its nest. Draw trails to grab smooth, round chunks of land, throw paint balls, cut other players' trails, and steal their eggs.
+
+There are three maps: **Classic** (circle), **Candy** (rounded square) and **Honeycomb** (hexagon).
 
 ## Get the Android app
 Every push builds an APK on GitHub Actions and publishes it as a **GitHub release** named `Nestnappers build N`.
@@ -38,9 +40,10 @@ npx cap sync android && (cd android && ./gradlew assembleDebug)   # local APK (n
 
 | Folder | What's inside |
 |---|---|
-| `src/core` | Game rules: grid, trails, flood-fill capture, eggs, the Void, power-ups (no rendering) |
+| `src/core` | Game rules on a fine invisible grid (3 cells per character width): trails, flood-fill capture, eggs, balls, the Void, power-ups (no rendering) |
+| `src/maps.ts` | Map shapes (circle, rounded square, hexagon) and colour themes |
 | `src/ai` | Bot brains (Expand / Flee / Attack / Raid / Carry / Star / Ghost) |
-| `src/render` | Three.js toon visuals: island, flowers, blobs, eggs, particles, camera |
+| `src/render` | Three.js visuals: smooth shader-drawn territory and trails, island and background, robots, eggs, balls, particles, camera |
 | `src/audio` | Synthesised sound effects and music (WebAudio, no files) |
 | `src/ui`, `src/input` | HUD, menus, settings/stats storage, swipe/keyboard/arrow controls |
 | `android/` | Capacitor Android wrapper (icon, splash, fullscreen) |

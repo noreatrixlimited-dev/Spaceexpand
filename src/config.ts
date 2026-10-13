@@ -1,44 +1,52 @@
 // Every tunable number in one place.
+// The rules run on a fine invisible grid: UNIT cells make one world unit
+// (one unit is about a character's width). Distances below are in cells.
+export const UNIT = 3;
+export const WORLD = 40; // world units across the board
+
 export const CONFIG = {
-  gridSize: 40,
-  tickRate: 30,
+  gridSize: WORLD * UNIT,
+  tickRate: 60,
   matchSeconds: 180,
 
-  cornerRadius: 7, // rounded corners of the island, in cells
-  baseSpeed: 6, // cells per second
-  turnRate: 11, // radians per second when steering toward the stick direction
+  baseSpeed: 6 * UNIT, // cells per second
+  turnRate: 9, // radians per second when steering toward the stick direction
   shadeSpeedMul: 1.25,
   carrySpeedMul: 0.7,
   boostSpeedMul: 1.5,
 
-  patchSize: 6,
-  coreInset: 4, // nest distance from the board corner (inside the rounded corner)
+  startRadius: 3.3 * UNIT, // round starting patch around the nest
+  nestDepth: 4.5 * UNIT, // how far inside the edge nests sit
+  nestReach: 1.5 * UNIT, // touching distance for nests
+  bumpDistance: 0.9 * UNIT, // touching distance between players
+  pickupReach: 1 * UNIT,
 
   coreHearts: 3,
   coreHitInvuln: 3,
   heartRegenSeconds: 30,
   bonkSeconds: 1.5,
-  freePatchRadius: 1, // 3x3 patch when a ghost breaks free
+  freePatchRadius: 1.2 * UNIT,
+  threatDistance: 5 * UNIT,
 
   voidStart: 60,
   voidInterval: 12,
-  voidMaxRings: 11,
+  voidMaxRings: 11, // each ring is one unit deep
 
   // Balls: more land = more balls and a bigger pouch.
   ballStart: 2,
   ballCapBase: 3,
   ballCapMax: 12,
-  ballCapLandPer: 35, // +1 pouch slot per this many owned cells
+  ballCapLandPer: 35 * UNIT * UNIT, // +1 pouch slot per this many owned cells
   ballRateBase: 0.18, // balls per second with no land
-  ballRatePerCell: 0.0012, // extra balls per second per owned cell
+  ballRatePerCell: 0.0012 / (UNIT * UNIT), // extra balls per second per owned cell
   ballCatchUp: 1.6, // rate multiplier for the player with the least land
-  throwRange: 7,
+  throwRange: 7 * UNIT,
   throwTime: 0.75, // flight time in seconds
   throwCooldown: 0.4,
-  splatRadius: 1.6,
-  hitRadius: 1.3,
+  splatRadius: 1.6 * UNIT,
+  hitRadius: 1.3 * UNIT,
   stunSeconds: 1,
-  knockback: 1.6,
+  knockback: 1.6 * UNIT,
   autoAimCone: 0.55, // radians either side of facing
   pickupInterval: 7,
   pickupMax: 5,
@@ -53,6 +61,7 @@ export type StartMode = 'patch' | 'quadrant';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
 export interface MatchOptions {
+  map?: string; // map id (see maps.ts); defaults to the classic circle
   startMode: StartMode;
   hardMode: boolean; // crossing your own trail bonks you
   humanSlot: number | null; // null = attract mode, all bots

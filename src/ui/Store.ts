@@ -12,6 +12,7 @@ export interface Settings {
   vibrate: boolean;
   seenHowTo: boolean;
   artVersion?: number;
+  map: string;
 }
 
 export interface Stats {
@@ -38,6 +39,7 @@ const defaults = (): { settings: Settings; stats: Stats } => ({
     slot: 0,
     vibrate: true,
     seenHowTo: false,
+    map: 'classic',
   },
   stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0 },
 });

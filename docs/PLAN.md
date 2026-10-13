@@ -275,6 +275,22 @@ Before committing to a name, check the Play Store and App Store, web domains and
   - *Effects:* it cuts enemy trails (bonk), stuns players it hits (1 s) and knocks them back 1.6 tiles (they drop any egg), and pops one nest heart (never steals the egg).
   - *Bots:* they throw at trails, players and nests, and lob balls ahead to grab land when their pouch is full.
 
+## 12c. Update: Paper.io-style redesign
+
+- **Smooth land:** no visible tiles. The rules run on a 120×120 invisible grid (3 cells per character width). The ground is one surface drawn by a shader from per-player textures, softly blurred and thresholded into smooth, rounded territory. Each territory has a darker front band so it looks slightly raised, and trails are a lighter ribbon.
+- **Smoother movement:** rules update at 60 ticks/s, turning is smooth, and the camera is mostly top-down with a slight look-ahead.
+- **Maps:**
+
+  | Map | Shape | Theme |
+  |---|---|---|
+  | Classic | Circle | White/blue |
+  | Candy | Rounded square | Pink |
+  | Honeycomb | Hexagon | Yellow |
+
+  Each map has its own island slab, polka-dot floor, sky and nest positions, and the clouds shrink it along its own shape.
+- **Interface:** a live, sliding leaderboard with colour bars; your big % with nest hearts; a small timer and event feed; the throw button; a map picker on the title screen; results showing your rank and %.
+- **Bots:** they draw curved petal-shaped loops, and their path planning runs about 10 times a second.
+
 ## 13. Status
 
 **Phase 1 (M0–M7) is done** and ships as an Android APK built by GitHub Actions (`.github/workflows/android.yml`).

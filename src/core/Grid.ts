@@ -10,11 +10,15 @@ export class Grid {
   readonly trail: Int8Array; // -1 none, else player id
   readonly voided: Uint8Array;
 
-  readonly cornerRadius: number;
+  /** Distance (in cells) from a cell centre to the island edge; negative = off the island. */
+  readonly insetOf: (x: number, y: number) => number;
+  /** How many cells deep one shrinking ring is. */
+  readonly ringWidth: number;
 
-  constructor(size: number, cornerRadius = 0) {
+  constructor(size: number, insetOf?: (x: number, y: number) => number, ringWidth = 1) {
     this.size = size;
-    this.cornerRadius = cornerRadius;
+    this.insetOf = insetOf ?? ((x, y) => Math.min(x, y, size - 1 - x, size - 1 - y) + 0.5);
+    this.ringWidth = ringWidth;
     const n = size * size;
     this.owner = new Int8Array(n).fill(-1);
     this.trail = new Int8Array(n).fill(-1);
@@ -36,19 +40,10 @@ export class Grid {
   walkable(x: number, y: number): boolean {
     return this.inside(x, y) && !this.voided[this.idx(x, y)];
   }
-  /**
-   * Which ring a cell belongs to, counting inward from the edge of the rounded-square
-   * island (0 = outermost). Cells cut off by the rounded corners return -1.
-   */
+  /** Which shrinking ring a cell belongs to, counting inward from the edge (0 = outermost; -1 = off the island). */
   ring(x: number, y: number): number {
-    const h = this.size / 2;
-    const r = this.cornerRadius;
-    const qx = Math.abs(x + 0.5 - h) - (h - r);
-    const qy = Math.abs(y + 0.5 - h) - (h - r);
-    const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
-    const inside = Math.min(Math.max(qx, qy), 0);
-    const inset = r - outside - inside;
-    return inset < 0 ? -1 : Math.floor(inset);
+    const inset = this.insetOf(x, y);
+    return inset < 0 ? -1 : Math.floor(inset / this.ringWidth);
   }
   countOwned(out: number[]): void {
     out.fill(0);

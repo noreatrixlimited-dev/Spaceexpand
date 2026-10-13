@@ -1,7 +1,7 @@
 import type { Difficulty } from '../config';
 import type { Game, Player } from '../core/Game';
-import { DX, DY, opposite, type Dir } from '../core/Grid';
-import { CONFIG } from '../config';
+import { DX, DY, type Dir } from '../core/Grid';
+import { CONFIG, UNIT } from '../config';
 import { bfs, manhattan } from './path';
 
 interface BotParams {
@@ -30,10 +30,24 @@ export class Bots {
   private readonly game: Game;
   private readonly params: BotParams;
   private readonly mode: Mode[] = ['idle', 'idle', 'idle', 'idle'];
+  private readonly lastThink = [-1, -1, -1, -1];
 
   constructor(game: Game, difficulty: Difficulty) {
     this.game = game;
-    this.params = PARAMS[difficulty];
+    // Distances in the table are in world units; the rules grid is UNIT cells per unit.
+    const base = PARAMS[difficulty];
+    this.params = {
+      ...base,
+      caution: base.caution * UNIT,
+      attackRange: base.attackRange * UNIT,
+      coreRange: base.coreRange * UNIT,
+      loopMin: base.loopMin * UNIT,
+      loopMax: base.loopMax * UNIT,
+      starRange: base.starRange * UNIT,
+      // bots step through UNIT times more cells, so per-step chances shrink
+      throwTrail: base.throwTrail / UNIT,
+      throwPlayer: base.throwPlayer / UNIT,
+    };
     game.onArrive = (p) => this.decide(p);
   }
 
@@ -48,6 +62,13 @@ export class Bots {
     const here = g.idx(p.x, p.y);
     if (p.plan.length && p.plan[0] === here) p.plan.shift();
 
+    // Heavy thinking (path searches) runs ~10 times a second; in between, just follow the plan.
+    if (p.plan.length && game.time - this.lastThink[p.id] < 0.1) {
+      this.follow(p);
+      return;
+    }
+    this.lastThink[p.id] = game.time;
+
     if (p.status === 'shade') {
       if (!p.plan.length || rng.chance(0.1)) this.planGhost(p);
       this.follow(p);
@@ -57,7 +78,7 @@ export class Bots {
     if (p.carrying >= 0) {
       if (this.mode[p.id] !== 'carry' || !p.plan.length) {
         const core = game.cores[p.id];
-        p.plan = this.path(p, (i) => manhattan(g, i, g.idx(core.x, core.y)) <= 1) ?? [];
+        p.plan = this.path(p, (i) => Math.hypot(g.x(i) - core.x, g.y(i) - core.y) <= CONFIG.nestReach - 0.5) ?? [];
         this.mode[p.id] = 'carry';
       }
       this.follow(p);
@@ -70,7 +91,7 @@ export class Bots {
     // Danger: run home if an enemy could reach my trail before I'm safe.
     if (!onHome && p.trail.length && this.mode[p.id] !== 'flee') {
       const home = this.path(p, (i) => g.owner[i] === p.id);
-      const homeDist = home ? home.length : 99;
+      const homeDist = home ? home.length : 999;
       const threat = this.threatDistance(p);
       const tooLong = p.trail.length > this.params.loopMax * 4;
       if (home && (tooLong || (threat <= homeDist + this.params.caution && rng.chance(this.params.reaction)))) {
@@ -110,7 +131,7 @@ export class Bots {
 
   private threatDistance(p: Player): number {
     const g = this.game.grid;
-    let best = 99;
+    let best = 999;
     for (const e of this.game.players) {
       if (e === p) continue;
       const hostile = (e.status === 'alive' && !this.isAlly(p, e.id)) || (e.status === 'shade' && e.shadeOf !== p.id);
@@ -158,7 +179,7 @@ export class Bots {
       for (const c of game.cores) {
         if (c.owner === p.id || c.state !== 'nest' || this.isAlly(p, c.owner)) continue;
         const ci = g.idx(c.x, c.y);
-        const route = this.path(p, (i) => manhattan(g, i, ci) <= 1, prm.coreRange);
+        const route = this.path(p, (i) => manhattan(g, i, ci) <= CONFIG.nestReach - 1, prm.coreRange);
         if (!route) continue;
         const score = route.length + c.hearts * 4;
         if (!bestPath || score < bestPath.length) bestPath = route;
@@ -202,9 +223,9 @@ export class Bots {
       const route = bfs(
         g,
         here,
-        (i) => !seen.has(i) && outward(i).length > 0 && rng.chance(0.35),
+        (i) => !seen.has(i) && outward(i).length > 0 && rng.chance(0.12),
         (i) => g.owner[i] === p.id,
-        30,
+        30 * UNIT,
       );
       if (route) {
         const cell = route[route.length - 1];
@@ -230,39 +251,40 @@ export class Bots {
         best = f;
       }
     }
+    // A curved "petal" loop: out along a half-ellipse and back to the border, like Paper.io bots.
     const d = rng.pick(best.dirs);
-    let side = (rng.chance(0.5) ? (d + 1) % 4 : (d + 3) % 4) as Dir;
-    const l1 = rng.int(prm.loopMin, prm.loopMax);
-    const l2 = rng.int(prm.loopMin, prm.loopMax);
-
+    const base = Math.atan2(DY[d], DX[d]) + (rng.next() - 0.5) * 0.7;
+    const depth = rng.int(prm.loopMin, prm.loopMax);
+    const width = rng.int(prm.loopMin, prm.loopMax) / 2;
+    const sideSign = rng.chance(0.5) ? 1 : -1;
+    const ox = g.x(best.cell) + 0.5;
+    const oy = g.y(best.cell) + 0.5;
+    const ca = Math.cos(base);
+    const sa = Math.sin(base);
     const seq: number[] = [];
+    const used = new Set<number>([best.cell]);
     let x = g.x(best.cell);
     let y = g.y(best.cell);
-    const legs: [Dir, number][] = [
-      [d, l1],
-      [side, l2],
-      [opposite(d), l1],
-    ];
-    const used = new Set<number>();
-    for (let leg = 0; leg < legs.length; leg++) {
-      let [dir, len] = legs[leg];
-      if (leg === 1 && !g.walkable(x + DX[dir], y + DY[dir])) {
-        side = opposite(side);
-        dir = side;
-        len = Math.max(len, 1);
-      }
-      for (let s = 0; s < len; s++) {
-        const nx = x + DX[dir];
-        const ny = y + DY[dir];
-        if (!g.walkable(nx, ny) || used.has(g.idx(nx, ny))) break;
+    const samples = 28;
+    outer: for (let k = 1; k <= samples; k++) {
+      const t = k / samples;
+      const fwd = depth * Math.sin(Math.PI * t);
+      const lat = sideSign * width * (1 - Math.cos(Math.PI * t));
+      const tx = Math.floor(ox + fwd * ca - lat * sa);
+      const ty = Math.floor(oy + fwd * sa + lat * ca);
+      // walk there one side-step at a time so the path stays 4-connected
+      while (x !== tx || y !== ty) {
+        const stepX = x !== tx && (y === ty || rng.chance(0.5));
+        const nx = stepX ? x + Math.sign(tx - x) : x;
+        const ny = stepX ? y : y + Math.sign(ty - y);
+        const i = g.idx(nx, ny);
+        if (!g.walkable(nx, ny) || used.has(i)) break outer;
         x = nx;
         y = ny;
-        const i = g.idx(x, y);
         seq.push(i);
         used.add(i);
-        if (g.owner[i] === p.id && seq.length > 1) break;
+        if (g.owner[i] === p.id && seq.length > UNIT * 2) break outer;
       }
-      if (seq.length && g.owner[seq[seq.length - 1]] === p.id) break;
     }
     // Then the shortest way home, not crossing the planned loop.
     const end = seq.length ? seq[seq.length - 1] : best.cell;
@@ -289,7 +311,7 @@ export class Bots {
       g.idx(p.x, p.y),
       (i) => g.trail[i] >= 0 && g.trail[i] !== p.shadeOf && g.trail[i] !== p.id,
       () => true,
-      12,
+      12 * UNIT,
     );
     if (trail) {
       p.plan = trail;
@@ -299,14 +321,14 @@ export class Bots {
       const targets = new Set(nests.map((c) => g.idx(c.x, c.y)));
       const route = nests.length
         ? bfs(g, g.idx(p.x, p.y), (i) => {
-            for (const t of targets) if (manhattan(g, i, t) <= 1) return true;
+            for (const t of targets) if (manhattan(g, i, t) <= CONFIG.nestReach - 1) return true;
             return false;
           }, () => true)
         : null;
       if (route && rng.chance(0.8)) p.plan = route;
       else {
-        const tx = rng.int(4, g.size - 5);
-        const ty = rng.int(4, g.size - 5);
+        const tx = rng.int(4 * UNIT, g.size - 4 * UNIT);
+        const ty = rng.int(4 * UNIT, g.size - 4 * UNIT);
         p.plan = bfs(g, g.idx(p.x, p.y), (i) => i === g.idx(tx, ty), () => true) ?? [];
       }
     }
@@ -340,7 +362,7 @@ export class Bots {
     const R = CONFIG.throwRange;
     const inRange = (x: number, y: number) => {
       const d = Math.hypot(x - p.px, y - p.py);
-      return d >= 2 && d <= R;
+      return d >= 2 * UNIT && d <= R;
     };
     // 1. Enemy trails: cutting one bonks its owner.
     const g = game.grid;
@@ -351,7 +373,7 @@ export class Bots {
         const t = g.trail[g.idx(x, y)];
         if (t < 0 || t === p.id || this.isAlly(p, t)) continue;
         const d = Math.hypot(x + 0.5 - p.px, y + 0.5 - p.py);
-        if (d >= 2 && d <= R && d < bestD) {
+        if (d >= 2 * UNIT && d <= R && d < bestD) {
           bestD = d;
           bestTrail = [x + 0.5, y + 0.5];
         }

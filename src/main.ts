@@ -10,6 +10,7 @@ import { Capacitor } from '@capacitor/core';
 import { Bots } from './ai/Bot';
 import { Sound } from './audio/Sound';
 import { CONFIG, PLAYER_COLORS, type MatchOptions } from './config';
+import { MAPS } from './maps';
 import { Game, type GameEvent } from './core/Game';
 import { Input } from './input/Input';
 import { loadArt } from './render/Scenery';
@@ -53,6 +54,32 @@ function buildLogo(): void {
     .join('');
 }
 
+const MAP_ICONS: Record<string, string> = {
+  circle: '<circle cx="22" cy="22" r="18"/>',
+  roundSquare: '<rect x="4" y="4" width="36" height="36" rx="10"/>',
+  hexagon: '<polygon points="40,22 31,37.6 13,37.6 4,22 13,6.4 31,6.4"/>',
+};
+
+function buildMapPicker(): void {
+  const wrap = $('maps');
+  wrap.innerHTML = '';
+  for (const m of MAPS) {
+    const b = document.createElement('button');
+    b.className = 'map-card' + (store.settings.map === m.id ? ' selected' : '');
+    b.style.setProperty('--mc', m.theme.ui);
+    b.innerHTML = `<svg viewBox="0 0 44 44" fill="${m.theme.slabTop}" stroke="${m.theme.ui}" stroke-width="3">${MAP_ICONS[m.shape]}</svg>${m.name}`;
+    b.onclick = () => {
+      sound.unlock();
+      sound.click();
+      store.settings.map = m.id;
+      store.save();
+      buildMapPicker();
+      if (phase === 'menu') newGame(null); // show the chosen map behind the menu
+    };
+    wrap.appendChild(b);
+  }
+}
+
 function buildColorPicker(): void {
   const wrap = $('colors');
   wrap.innerHTML = '';
@@ -67,6 +94,7 @@ function buildColorPicker(): void {
       store.settings.slot = i;
       store.save();
       buildColorPicker();
+buildMapPicker();
     };
     wrap.appendChild(b);
   });
@@ -112,6 +140,7 @@ function applySettings(): void {
 
 function newGame(humanSlot: number | null): void {
   const opts: MatchOptions = {
+    map: store.settings.map,
     startMode: store.settings.startMode,
     hardMode: store.settings.hardMode,
     humanSlot,
@@ -293,23 +322,29 @@ function onGameOver(winner: number, reason: 'last' | 'time'): void {
   else sound.lose();
   hud.toast(won ? 'You win!' : `${nameOf(winner)} wins!`, true);
 
-  const playable = game.grid.size * game.grid.size;
   const st = store.stats;
+  const peakPct = (id: number) => (game.players[id].stats.peakLand / game.totalCells) * 100;
   st.games++;
   if (won) st.wins++;
-  if (human !== null) st.bestLandPct = Math.max(st.bestLandPct, Math.round((game.players[human].stats.peakLand / playable) * 100));
+  if (human !== null) st.bestLandPct = Math.max(st.bestLandPct, Math.round(peakPct(human)));
   store.save();
 
   // results card
   $('resultTitle').textContent = won ? 'You win!' : winner >= 0 ? `${game.players[winner].name} wins!` : 'Game over';
   $('resultReason').textContent = reason === 'last' ? 'Last nest standing' : 'Most land when time ran out';
+  const order = game.ranking();
+  const big = $('resultBig');
+  if (human !== null) {
+    big.style.setProperty('--c', PLAYER_COLORS[human]);
+    big.textContent = `#${order.indexOf(human) + 1} · ${game.percent(human).toFixed(1)}%`;
+  } else big.textContent = '';
   const places = ['1st', '2nd', '3rd', '4th'];
   $('ranking').innerHTML = game
     .ranking()
     .map((id, k) => {
       const c = game.cores[id];
-      const pct = Math.round((game.land[id] / playable) * 100);
-      const tag = c.state === 'captured' ? 'captured' : `${pct}% land`;
+      const pct = game.percent(id);
+      const tag = c.state === 'captured' ? 'captured' : `${pct.toFixed(1)}%`;
       return `<div class="rank-row${id === human ? ' me' : ''}" style="animation-delay:${0.1 + k * 0.08}s">
         <span class="place">${places[k]}</span>
         <span class="dot" style="background:${PLAYER_COLORS[id]}"></span>
@@ -320,7 +355,7 @@ function onGameOver(winner: number, reason: 'last' | 'time'): void {
   if (human !== null) {
     const s = game.players[human].stats;
     $('myStats').innerHTML = `
-      <div><b>${Math.round((s.peakLand / playable) * 100)}%</b>peak land</div>
+      <div><b>${peakPct(human).toFixed(1)}%</b>peak land</div>
       <div><b>${s.bonks}</b>trails cut</div>
       <div><b>${s.captures}</b>nests taken</div>`;
   }
@@ -576,6 +611,7 @@ if (location.search.includes('debug')) {
 
 buildLogo();
 buildColorPicker();
+buildMapPicker();
 syncDifficulty();
 syncSettingsUI();
 // Load the 3D art, then start. If it fails (e.g. offline web build), the game still runs with simple shapes.

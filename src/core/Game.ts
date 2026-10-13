@@ -1,4 +1,5 @@
-import { CONFIG, PLAYER_NAMES, type MatchOptions } from '../config';
+import { CONFIG, PLAYER_NAMES, UNIT, type MatchOptions } from '../config';
+import { cellInset, getMap, nestSpots, type MapDef } from '../maps';
 import { computeCapture } from './capture';
 import { Grid, type Dir } from './Grid';
 import { Rng } from './rng';
@@ -108,12 +109,15 @@ export function wrapAngle(a: number): number {
 
 export class Game {
   readonly opts: MatchOptions;
+  readonly map: MapDef;
   readonly grid: Grid;
   readonly players: Player[] = [];
   readonly cores: Core[] = [];
   readonly star: Star;
   readonly rng: Rng;
   readonly land = [0, 0, 0, 0];
+  /** Playable cells at the start (for percentages). */
+  readonly totalCells: number;
   readonly projectiles: Projectile[] = [];
   readonly pickups: Pickup[] = [];
   events: GameEvent[] = [];
@@ -132,21 +136,20 @@ export class Game {
     this.opts = opts;
     this.rng = new Rng(opts.seed);
     const size = CONFIG.gridSize;
-    this.grid = new Grid(size, CONFIG.cornerRadius);
+    this.map = getMap(opts.map);
+    this.grid = new Grid(size, cellInset(this.map, size), UNIT);
     const g = this.grid;
-    // Rounded corners: cells outside the rounded square are gone from the start.
+    // Everything outside the map's shape is gone from the start.
     for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (g.ring(x, y) < 0) g.voided[g.idx(x, y)] = 1;
 
-    const c = CONFIG.coreInset;
-    const far = size - 1 - c;
-    const corners = [
-      [c, c],
-      [c, far],
-      [far, far],
-      [far, c],
-    ];
+    let total = 0;
+    for (let i = 0; i < g.voided.length; i++) if (!g.voided[i]) total++;
+    this.totalCells = total;
+
+    const spots = nestSpots(this.map, CONFIG.nestDepth / UNIT);
     for (let id = 0; id < 4; id++) {
-      const [x, y] = corners[id];
+      const x = Math.floor(spots[id][0] * UNIT + size / 2);
+      const y = Math.floor(spots[id][1] * UNIT + size / 2);
       this.cores.push({ owner: id, homeX: x, homeY: y, x, y, hearts: CONFIG.coreHearts, invuln: 0, state: 'nest', carrier: -1, regenTimer: 0, threatened: false });
       this.players.push({
         id,
@@ -185,19 +188,17 @@ export class Game {
     const g = this.grid;
     const half = g.size / 2;
     const core = this.cores[id];
-    const left = core.x < half;
-    const top = core.y < half;
-    let x0: number, x1: number, y0: number, y1: number;
-    if (this.opts.startMode === 'quadrant') {
-      [x0, x1] = left ? [0, half - 1] : [half, g.size - 1];
-      [y0, y1] = top ? [0, half - 1] : [half, g.size - 1];
-    } else {
-      // A patch centred on the nest.
-      const r = Math.floor(CONFIG.patchSize / 2);
-      [x0, x1] = [core.x - r + (left ? 0 : 1), core.x + r - (left ? 1 : 0)];
-      [y0, y1] = [core.y - r + (top ? 0 : 1), core.y + r - (top ? 1 : 0)];
+    const quadrant = this.opts.startMode === 'quadrant';
+    const R = CONFIG.startRadius;
+    for (let y = 0; y < g.size; y++) {
+      for (let x = 0; x < g.size; x++) {
+        if (!g.walkable(x, y)) continue;
+        const mine = quadrant
+          ? Math.sign(x + 0.5 - half) === Math.sign(core.x + 0.5 - half) && Math.sign(y + 0.5 - half) === Math.sign(core.y + 0.5 - half)
+          : Math.hypot(x - core.x, y - core.y) <= R;
+        if (mine) g.owner[g.idx(x, y)] = id;
+      }
     }
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (g.walkable(x, y)) g.owner[g.idx(x, y)] = id;
   }
 
   // ---------- input ----------
@@ -222,6 +223,7 @@ export class Game {
     this.time += dt;
 
     for (const p of this.players) this.updatePlayer(p, dt);
+    this.checkContacts();
     this.updateBalls(dt);
     this.updateProjectiles(dt);
     this.updateCores(dt);
@@ -344,13 +346,6 @@ export class Game {
       }
     }
 
-    // Bumping into an egg carrier knocks the egg back to its nest.
-    for (const q of this.players) {
-      if (q === p || q.x !== p.x || q.y !== p.y || q.status === 'bonked') continue;
-      if (q.carrying >= 0 && q.status !== 'shade' && q.shadeOf !== p.id) this.dropEgg(q, p.id);
-      if (p.carrying >= 0 && p.shadeOf !== q.id && q.shadeOf !== p.id) this.dropEgg(p, q.id);
-    }
-
     if (g.owner[cell] === p.id) {
       if (p.trail.length) this.closeLoop(p);
     } else if (g.trail[cell] !== p.id) {
@@ -368,19 +363,39 @@ export class Game {
       }
     }
 
-    if (this.star.active && p.x === this.star.x && p.y === this.star.y) this.grantPower(p);
+  }
 
-    for (let k = this.pickups.length - 1; k >= 0; k--) {
-      const pk = this.pickups[k];
-      if (pk.x !== p.x || pk.y !== p.y) continue;
-      p.balls = Math.min(this.ballCap(p.id) + CONFIG.pickupBalls, p.balls + CONFIG.pickupBalls);
-      this.pickups.splice(k, 1);
-      this.events.push({ type: 'pickup', pid: p.id, x: pk.x, y: pk.y });
+  /** Touching things by distance: egg carriers, the star and ball pickups. */
+  private checkContacts(): void {
+    const ps = this.players;
+    for (let i = 0; i < ps.length; i++) {
+      const p = ps[i];
+      if (p.status === 'bonked') continue;
+      for (let j = i + 1; j < ps.length; j++) {
+        const q = ps[j];
+        if (q.status === 'bonked' || Math.hypot(p.px - q.px, p.py - q.py) > CONFIG.bumpDistance) continue;
+        // Bumping into an egg carrier knocks the egg back to its nest.
+        for (const [a, b] of [
+          [p, q],
+          [q, p],
+        ]) {
+          if (b.carrying >= 0 && b.status !== 'shade' && a.status !== 'shade' && !this.isAlly(a.id, b.id)) this.dropEgg(b, a.id);
+        }
+      }
+      if (p.status !== 'alive') continue;
+      if (this.star.active && Math.hypot(p.px - (this.star.x + 0.5), p.py - (this.star.y + 0.5)) <= CONFIG.pickupReach) this.grantPower(p);
+      for (let k = this.pickups.length - 1; k >= 0; k--) {
+        const pk = this.pickups[k];
+        if (Math.hypot(p.px - (pk.x + 0.5), p.py - (pk.y + 0.5)) > CONFIG.pickupReach) continue;
+        p.balls = Math.min(this.ballCap(p.id) + CONFIG.pickupBalls, p.balls + CONFIG.pickupBalls);
+        this.pickups.splice(k, 1);
+        this.events.push({ type: 'pickup', pid: p.id, x: pk.x, y: pk.y });
+      }
     }
   }
 
   private near(c: Core, x: number, y: number): boolean {
-    return Math.abs(c.x - x) + Math.abs(c.y - y) <= 1;
+    return Math.hypot(c.x - x, c.y - y) <= CONFIG.nestReach;
   }
 
   private protectedCells(except: number): Set<number> {
@@ -525,10 +540,10 @@ export class Game {
     c.y = c.homeY;
     this.slideCoreInward(c);
     const others = this.protectedCells(p.id);
-    const r = CONFIG.freePatchRadius;
+    const r = Math.ceil(CONFIG.freePatchRadius);
     for (let y = c.y - r; y <= c.y + r; y++) {
       for (let x = c.x - r; x <= c.x + r; x++) {
-        if (!g.walkable(x, y)) continue;
+        if (!g.walkable(x, y) || Math.hypot(x - c.x, y - c.y) > CONFIG.freePatchRadius) continue;
         const i = g.idx(x, y);
         if (!others.has(i)) g.owner[i] = p.id;
       }
@@ -594,7 +609,7 @@ export class Game {
       const dx = tx - p.px;
       const dy = ty - p.py;
       const d = Math.hypot(dx, dy);
-      if (d < 1.5 || d > CONFIG.throwRange + 1) return;
+      if (d < 1.5 * UNIT || d > CONFIG.throwRange + UNIT) return;
       const a = Math.atan2(dy, dx);
       const off = Math.abs(wrapAngle(a - p.heading));
       if (off > cone) return;
@@ -636,7 +651,7 @@ export class Game {
       a = target ? target.angle : p.heading;
       r = target ? target.dist : undefined;
     }
-    r = Math.max(2, Math.min(CONFIG.throwRange, r ?? CONFIG.throwRange));
+    r = Math.max(2 * UNIT, Math.min(CONFIG.throwRange, r ?? CONFIG.throwRange));
     const proj: Projectile = {
       id: this.nextId++,
       owner: pid,
@@ -683,7 +698,9 @@ export class Game {
       const guard = new Set<number>();
       for (const c of this.cores) {
         if (c.state === 'captured') continue;
-        for (let y = c.y - 1; y <= c.y + 1; y++) for (let x = c.x - 1; x <= c.x + 1; x++) if (g.inside(x, y)) guard.add(g.idx(x, y));
+        const r = Math.ceil(CONFIG.nestReach);
+        for (let y = c.y - r; y <= c.y + r; y++)
+          for (let x = c.x - r; x <= c.x + r; x++) if (g.inside(x, y) && Math.hypot(x - c.x, y - c.y) <= CONFIG.nestReach) guard.add(g.idx(x, y));
       }
       const R = CONFIG.splatRadius;
       for (let y = Math.floor(pr.ty - R); y <= Math.floor(pr.ty + R); y++) {
@@ -761,8 +778,8 @@ export class Game {
     if (this.pickups.length >= CONFIG.pickupMax) return;
     const g = this.grid;
     for (let tries = 0; tries < 30; tries++) {
-      const x = this.rng.int(2, g.size - 3);
-      const y = this.rng.int(2, g.size - 3);
+      const x = this.rng.int(UNIT, g.size - 1 - UNIT);
+      const y = this.rng.int(UNIT, g.size - 1 - UNIT);
       const i = g.idx(x, y);
       if (!g.walkable(x, y) || g.owner[i] >= 0 || g.ring(x, y) < 2) continue;
       if (this.pickups.some((p) => p.x === x && p.y === y)) continue;
@@ -782,7 +799,7 @@ export class Game {
       if (c.state !== 'nest') continue;
       for (const p of this.players) {
         if (p.id === c.owner || p.status !== 'alive') continue;
-        if (Math.abs(p.x - c.x) + Math.abs(p.y - c.y) <= 5) c.threatened = true;
+        if (Math.hypot(p.x - c.x, p.y - c.y) <= CONFIG.threatDistance) c.threatened = true;
       }
       const owner = this.players[c.owner];
       if (c.hearts < CONFIG.coreHearts && owner.status === 'alive' && g.owner[g.idx(owner.x, owner.y)] === owner.id) {
@@ -867,8 +884,8 @@ export class Game {
     const g = this.grid;
     const mid = Math.floor(g.size / 2);
     for (let tries = 0; tries < 20; tries++) {
-      const x = mid + this.rng.int(-2, 1);
-      const y = mid + this.rng.int(-2, 1);
+      const x = mid + this.rng.int(-2 * UNIT, 2 * UNIT);
+      const y = mid + this.rng.int(-2 * UNIT, 2 * UNIT);
       if (g.walkable(x, y)) {
         this.star.x = x;
         this.star.y = y;
@@ -900,6 +917,11 @@ export class Game {
       if (best < 0 || this.land[c.owner] > this.land[best]) best = c.owner;
     }
     return best;
+  }
+
+  /** Share of the original island a player owns, in percent. */
+  percent(pid: number): number {
+    return (this.land[pid] / this.totalCells) * 100;
   }
 
   /** Final standings: surviving nests first, then by land. */

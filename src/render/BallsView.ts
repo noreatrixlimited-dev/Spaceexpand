@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CONFIG, PLAYER_COLORS } from '../config';
+import { CONFIG, PLAYER_COLORS, UNIT } from '../config';
 import type { Game } from '../core/Game';
 import { toon } from './materials';
 
@@ -35,8 +35,9 @@ export class BallsView {
     }
   }
 
+  /** Grid position (cells) -> world units. */
   private toWorld(x: number, y: number, out: THREE.Vector3): THREE.Vector3 {
-    return out.set(x - this.size / 2, 0, y - this.size / 2);
+    return out.set((x - this.size / 2) / UNIT, 0, (y - this.size / 2) / UNIT);
   }
 
   update(game: Game, avatarPos: THREE.Vector3[], time: number): void {
@@ -81,7 +82,7 @@ export class BallsView {
       f.ball.rotation.x = t * 12;
       this.toWorld(pr.tx, pr.ty, f.marker.position);
       f.marker.position.y = 0.09;
-      f.marker.scale.setScalar(CONFIG.splatRadius * (1.05 - 0.35 * t) + Math.sin(time * 20) * 0.04);
+      f.marker.scale.setScalar((CONFIG.splatRadius / UNIT) * (1.05 - 0.35 * t) + Math.sin(time * 20) * 0.04);
     }
     for (const [id, f] of this.flying) {
       if (seen.has(id)) continue;
