@@ -6,6 +6,7 @@ export interface MapTheme {
   sky: [string, string]; // background top / bottom
   ground: string; // the floor far below the island
   groundDots: string;
+  water: [string, string]; // sea around the island: shallow / deep
   neutral: string; // unclaimed land
   neutralPattern: string; // subtle pattern on unclaimed land
   slabTop: string; // island rim
@@ -35,6 +36,7 @@ export const MAPS: MapDef[] = [
       sky: ['#eef3fb', '#dfe8f5'],
       ground: '#dfe7f2',
       groundDots: '#d2dcea',
+      water: ['#7fdcf0', '#2f8fd8'],
       neutral: '#ffffff',
       neutralPattern: '#eef1f7',
       slabTop: '#f4f6fb',
@@ -53,6 +55,7 @@ export const MAPS: MapDef[] = [
       sky: ['#ffe1ec', '#ffd0e0'],
       ground: '#ffd6e5',
       groundDots: '#ffc4d9',
+      water: ['#ffc2dc', '#f27aae'],
       neutral: '#fff6ea',
       neutralPattern: '#ffe9d6',
       slabTop: '#ffd9e6',
@@ -71,6 +74,7 @@ export const MAPS: MapDef[] = [
       sky: ['#fff1c9', '#ffe39b'],
       ground: '#ffe7a8',
       groundDots: '#ffdb86',
+      water: ['#ffd76a', '#f2a52a'],
       neutral: '#fffaf0',
       neutralPattern: '#fff0cc',
       slabTop: '#ffe9a6',

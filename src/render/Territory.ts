@@ -9,6 +9,9 @@ import type { MapTheme } from '../maps';
  * fine grid into smooth, rounded territory and trails, with a darker "side" band
  * so each territory looks like a slightly raised slab.
  */
+/** How high owned land stands above unclaimed land (world units). */
+export const LAND_HEIGHT = 0.26;
+
 export class Territory {
   readonly mesh: THREE.Mesh;
   private readonly n: number;
@@ -47,7 +50,8 @@ export class Territory {
     this.landTex = tex(this.land);
 
     const world = n / UNIT;
-    const geo = new THREE.PlaneGeometry(world, world, 1, 1);
+    // Finely subdivided so owned land can rise up as real 3D slabs.
+    const geo = new THREE.PlaneGeometry(world, world, n * 2, n * 2);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.75, metalness: 0 });
     const col = (c: string) => new THREE.Color(c);
@@ -68,13 +72,41 @@ export class Territory {
       uDangerId: { value: -1 },
       uDanger: { value: 0 },
       uTime: { value: 0 },
+      uHeight: { value: LAND_HEIGHT },
     };
     this.uniforms = uniforms;
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec2 vGrid;\nuniform float uWorld;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGrid = position.xz / uWorld + 0.5;');
+        .replace(
+          '#include <common>',
+          `#include <common>
+          varying vec2 vGrid;
+          varying float vSlope;
+          uniform float uWorld; uniform float uTexel; uniform float uHeight;
+          uniform sampler2D uOwn;
+          float landH(vec2 uv) {
+            float o = uTexel * 0.75;
+            vec4 v = texture2D(uOwn, uv) * 0.32
+              + (texture2D(uOwn, uv + vec2(o, o)) + texture2D(uOwn, uv + vec2(-o, o))
+              + texture2D(uOwn, uv + vec2(o, -o)) + texture2D(uOwn, uv + vec2(-o, -o))) * 0.17;
+            float m = max(max(v.r, v.g), max(v.b, v.a));
+            return smoothstep(0.4, 0.6, m) * uHeight;
+          }`,
+        )
+        .replace(
+          '#include <beginnormal_vertex>',
+          `vec2 gUv = position.xz / uWorld + 0.5;
+          float e = uTexel;
+          float hx = landH(gUv + vec2(e, 0.0)) - landH(gUv - vec2(e, 0.0));
+          float hz = landH(gUv + vec2(0.0, e)) - landH(gUv - vec2(0.0, e));
+          vec3 objectNormal = normalize(vec3(-hx, 2.0 * e * uWorld, -hz));
+          vSlope = 1.0 - objectNormal.y;
+          #ifdef USE_TANGENT
+            vec3 objectTangent = vec3(tangent.xyz);
+          #endif`,
+        )
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGrid = gUv;\ntransformed.y += landH(gUv);');
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
@@ -85,6 +117,7 @@ export class Territory {
           uniform vec3 uNeutral; uniform vec3 uPattern;
           uniform vec3 uP[4]; uniform vec3 uS[4]; uniform vec3 uT[4];
           uniform float uDangerId; uniform float uDanger; uniform float uTime;
+          varying float vSlope;
           // strongest channel and its value
           vec2 pick(vec4 v) {
             float id = 0.0; float m = v.r;
@@ -114,13 +147,15 @@ export class Territory {
           vec2 cell = fract(w * 0.5) - 0.5;
           float dots = 1.0 - smoothstep(0.12, 0.16, length(cell));
           vec3 col = mix(uNeutral, uPattern, dots * 0.8);
-          // territory with a raised look: darker band on the side facing the camera
+          // Territory: raised slabs (the vertex shader lifts them); the wall facing the camera
+          // gets the darker side colour and the top edge a light lip.
           vec2 me = pick(soft(uOwn, uv));
-          vec2 above = pick(soft(uOwn, uv - vec2(0.0, uTexel * 1.1)));
+          vec2 above = pick(soft(uOwn, uv - vec2(0.0, uTexel * 1.3)));
           float t = smoothstep(0.42, 0.58, me.y);
           float side = smoothstep(0.42, 0.58, above.y) * (1.0 - t);
-          col = mix(col, byId(uS, above.x), side);
-          float lip = t * (1.0 - smoothstep(0.42, 0.58, pick(soft(uOwn, uv - vec2(0.0, uTexel * 0.45))).y));
+          side = max(side, clamp(vSlope * 4.0, 0.0, 1.0) * step(0.05, max(me.y, above.y)));
+          col = mix(col, byId(uS, above.y > me.y ? above.x : me.x), side);
+          float lip = t * (1.0 - smoothstep(0.42, 0.58, pick(soft(uOwn, uv - vec2(0.0, uTexel * 0.5))).y));
           col = mix(col, byId(uP, me.x), t);
           col = mix(col, byId(uP, me.x) * 1.12 + 0.05, lip * 0.6);
           // fresh capture glow
@@ -142,6 +177,18 @@ export class Territory {
     mat.transparent = false;
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.receiveShadow = true;
+  }
+
+  /** Height of the drawn land at a grid position (cells), so riders and nests sit on top. */
+  heightAt(px: number, py: number): number {
+    const n = this.n;
+    const x = Math.max(0, Math.min(n - 1, Math.floor(px)));
+    const y = Math.max(0, Math.min(n - 1, Math.floor(py)));
+    const k = (y * n + x) * 4;
+    const o = this.own;
+    const m = Math.max(o[k], o[k + 1], o[k + 2], o[k + 3]) / 255;
+    const t = Math.max(0, Math.min(1, (m - 0.4) / 0.2));
+    return t * t * (3 - 2 * t) * LAND_HEIGHT;
   }
 
   /** Tint one player's trail by how risky it is (0..1). */

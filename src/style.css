@@ -1263,3 +1263,36 @@ button:active {
 .card.won h2 {
   animation: bob 1.4s ease-in-out infinite;
 }
+
+/* watching after being knocked out */
+#spectate {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(26px + var(--safe-bottom));
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 16px;
+  border-radius: 999px;
+  background: rgba(60, 70, 110, 0.6);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+#spectate .btn {
+  font-size: 14px;
+  padding: 6px 14px;
+}
+#hud.spectating #spectate {
+  display: flex;
+}
+#hud.spectating #leaderboard,
+#hud.spectating #me,
+#hud.spectating #throwBtn,
+#hud.spectating #dpad,
+#hud.spectating #power {
+  display: none !important;
+}

@@ -22,6 +22,11 @@ export class Hud {
   private lastTimerText = '';
   private boardTimer = 0;
 
+  /** Out of the match: hide the score bits and show a small "watching" banner. */
+  setSpectating(v: boolean): void {
+    this.root.classList.toggle('spectating', v);
+  }
+
   show(v: boolean): void {
     this.root.classList.toggle('hidden', !v);
   }

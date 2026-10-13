@@ -144,11 +144,13 @@ export class World {
 
   /** Grid cell centre -> world position. */
   private cellPos(x: number, y: number, out = new THREE.Vector3()): THREE.Vector3 {
-    return out.set((x + 0.5) / UNIT - this.half, 0, (y + 0.5) / UNIT - this.half);
+    const h = this.territory ? this.territory.heightAt(x + 0.5, y + 0.5) : 0;
+    return out.set((x + 0.5) / UNIT - this.half, h, (y + 0.5) / UNIT - this.half);
   }
   /** Continuous grid position -> world position. */
   private gridPos(px: number, py: number, out = new THREE.Vector3()): THREE.Vector3 {
-    return out.set(px / UNIT - this.half, 0, py / UNIT - this.half);
+    const h = this.territory ? this.territory.heightAt(px, py) : 0;
+    return out.set(px / UNIT - this.half, h, py / UNIT - this.half);
   }
 
   setGame(game: Game): void {
@@ -384,7 +386,7 @@ export class World {
       this.starMesh.visible = this.starScale > 0.02;
       if (this.starMesh.visible) {
         this.cellPos(game.star.x, game.star.y, this.starMesh.position);
-        this.starMesh.position.y = 0.75 + Math.sin(this.time * 3) * 0.12;
+        this.starMesh.position.y += 0.75 + Math.sin(this.time * 3) * 0.12;
         this.starMesh.rotation.y = this.time * 2;
         this.starMesh.scale.setScalar(this.starScale);
       }
@@ -428,7 +430,7 @@ export class World {
     const ready = p.balls > 0 && p.throwCooldown <= 0 && p.stunTimer <= 0;
     this.readyRing.visible = ready;
     if (ready) {
-      this.readyRing.position.set(pos.x, 0.03, pos.z);
+      this.readyRing.position.set(pos.x, pos.y + 0.03, pos.z);
       this.readyRing.scale.setScalar(1 + Math.sin(this.time * 5) * 0.05);
       (this.readyRing.material as THREE.MeshBasicMaterial).opacity = 0.45 + Math.sin(this.time * 5) * 0.2;
     }
