@@ -102,6 +102,80 @@ export function buildHat(kind: HatKind): { hat: THREE.Group; height: number } {
       height = 0.38;
       break;
     }
+    case 'ninja': {
+      const red = toon('#e8436f', { roughness: 0.6 });
+      const band = add(new THREE.CylinderGeometry(0.31, 0.31, 0.08, 24, 1, true), red, 0, -0.14);
+      (band.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+      for (const s of [-1, 1]) {
+        const tail = add(new THREE.BoxGeometry(0.05, 0.22, 0.03), red, s * 0.05, -0.2, -0.33);
+        tail.rotation.z = s * 0.4;
+        tail.rotation.x = 0.4;
+      }
+      height = 0.02;
+      break;
+    }
+    case 'cat': {
+      const fur = toon('#f4ab88', { roughness: 0.7 });
+      const pink = toon('#ffb3c7', { roughness: 0.7 });
+      for (const s of [-1, 1]) {
+        const ear = add(new THREE.ConeGeometry(0.11, 0.22, 4), fur, s * 0.18, 0.08);
+        ear.rotation.z = s * -0.25;
+        const inner = add(new THREE.ConeGeometry(0.06, 0.13, 4), pink, s * 0.18, 0.07, 0.04);
+        inner.rotation.z = s * -0.25;
+      }
+      height = 0.22;
+      break;
+    }
+    case 'chef': {
+      const white = toon('#ffffff', { roughness: 0.9 });
+      add(new THREE.CylinderGeometry(0.22, 0.22, 0.2, 18), white, 0, 0.08);
+      for (let k = 0; k < 5; k++) {
+        const a = (k / 5) * Math.PI * 2;
+        add(new THREE.SphereGeometry(0.13, 12, 10), white, Math.cos(a) * 0.12, 0.25, Math.sin(a) * 0.12);
+      }
+      add(new THREE.SphereGeometry(0.15, 12, 10), white, 0, 0.3);
+      height = 0.42;
+      break;
+    }
+    case 'viking': {
+      const metal = toon('#cfd6df', { metalness: 0.4, roughness: 0.35 });
+      const horn = toon('#fff3dc', { roughness: 0.5 });
+      const cap = add(new THREE.SphereGeometry(0.31, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), metal, 0, -0.06);
+      cap.scale.y = 0.75;
+      for (const s of [-1, 1]) {
+        const h = add(new THREE.ConeGeometry(0.06, 0.32, 10), horn, s * 0.34, 0.08);
+        h.rotation.z = s * -1.0;
+      }
+      height = 0.2;
+      break;
+    }
+    case 'pumpkin': {
+      const orange = toon('#ff8a1f', { roughness: 0.6 });
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        const lobe = add(new THREE.SphereGeometry(0.18, 12, 10), orange, Math.cos(a) * 0.12, 0.1, Math.sin(a) * 0.12);
+        lobe.scale.y = 0.85;
+      }
+      add(new THREE.CylinderGeometry(0.03, 0.04, 0.12, 6), toon('#5bbf3f'), 0, 0.3);
+      height = 0.34;
+      break;
+    }
+    case 'tophat': {
+      const black = toon('#232030', { roughness: 0.5 });
+      add(new THREE.CylinderGeometry(0.36, 0.36, 0.03, 24), black, 0, 0);
+      add(new THREE.CylinderGeometry(0.21, 0.21, 0.34, 20), black, 0, 0.18);
+      add(new THREE.CylinderGeometry(0.215, 0.215, 0.06, 20), toon('#e8436f'), 0, 0.06);
+      height = 0.36;
+      break;
+    }
+    case 'halo': {
+      const gold = toon('#ffd43b', { emissive: '#ffb703', emissiveIntensity: 0.6, metalness: 0.3, roughness: 0.3 });
+      const ring = add(new THREE.TorusGeometry(0.22, 0.035, 8, 28), gold, 0, 0.22);
+      ring.rotation.x = Math.PI / 2;
+      ring.castShadow = false;
+      height = 0.3;
+      break;
+    }
     default:
       break;
   }

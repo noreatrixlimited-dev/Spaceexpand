@@ -1,4 +1,5 @@
 import type { StartMode } from '../config';
+import type { MissionDay } from './Missions';
 
 export interface Settings {
   music: boolean;
@@ -34,8 +35,13 @@ export interface Stats {
   stars: Record<string, number>;
   /** Day (YYYY-MM-DD) of the last win, for the first-win-of-the-day bonus. */
   lastWinDay: string;
-  /** Skins bought early with coins. */
+  /** Skins bought early with coins (or won from events and gifts). */
   owned: number[];
+  missions: MissionDay | null;
+  /** 7-day gift: last claim day and how many gifts claimed so far. */
+  gift: { last: string; count: number };
+  /** Weeks in which the event island was won. */
+  eventWeeks: number[];
 }
 
 const KEY = 'nestnappers.v1';
@@ -57,7 +63,7 @@ const defaults = (): { settings: Settings; stats: Stats } => ({
     tutorialDone: false,
     skin: 0,
   },
-  stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '', unlocked: 1, champion: false, coins: 0, stars: {}, lastWinDay: '', owned: [] },
+  stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '', unlocked: 1, champion: false, coins: 0, stars: {}, lastWinDay: '', owned: [], missions: null, gift: { last: '', count: 0 }, eventWeeks: [] },
 });
 
 /** Settings and lifetime stats, saved in localStorage (best effort). */

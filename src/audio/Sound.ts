@@ -473,6 +473,12 @@ export class Sound {
     g.setTargetAtTime(0.2, t + seconds, 0.6);
   }
 
+  private tension = 0;
+  /** 0..1: how risky your trail is; adds a pulsing low line to the music. */
+  setTension(v: number): void {
+    this.tension = v;
+  }
+
   private leading = false;
   /** While you're in 1st place, a sparkly extra layer joins the music. */
   setLeading(v: boolean): void {
@@ -555,6 +561,10 @@ export class Sound {
         const arp = [0, 2, 4, 2][i % 4];
         const deg = chordDeg + arp;
         this.bell(midi(st.root + 24 + scale[deg % 7] + 12 * Math.floor(deg / 7)), 0.2, { vol: 0.08, ratio: 4, index: 0.6, delay, dest, wet: 0 });
+      }
+      // tension: a pulsing low octave while your trail is in danger
+      if (this.tension > 0.5 && !this.calm) {
+        this.tone(midi(chordRoot - 12 + (i % 2 ? 12 : 0)), stepDur * 0.9, { type: 'sawtooth', vol: 0.06 + this.tension * 0.08, cutoff: 500 + this.tension * 900, delay, dest });
       }
       // light drums during matches
       if (!this.calm) {

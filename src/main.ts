@@ -11,8 +11,10 @@ import { Bots } from './ai/Bot';
 import { Director, pickMood } from './ai/Director';
 import { Sound } from './audio/Sound';
 import { CONFIG, PLAYER_COLORS, UNIT, type MatchOptions } from './config';
-import { LEVEL_MAPS } from './maps';
-import { SKINS } from './skins';
+import { eventMap, LEVEL_MAPS, weekNumber, type MapDef } from './maps';
+import { EVENT_INDEX } from './render/WorldMap';
+import { applyMatch, dailyMissions, GIFT_COINS, missionText, today, today as todayStr } from './ui/Missions';
+import { eventSkinIndex, GIFT_SKIN, SKINS } from './skins';
 import { Game, type GameEvent } from './core/Game';
 import { Input } from './input/Input';
 import { loadArt } from './render/Scenery';
@@ -40,9 +42,11 @@ let replayLeft = -1;
 let smoothDt = 1 / 60;
 let humanOut = false;
 /** What happened to you this match (for the results screen). */
-let log = { heartsLost: 0, bonked: 0, stolen: false, outlasted: 0 };
+let log = { heartsLost: 0, bonked: 0, stolen: false, outlasted: 0, combos: 0 };
 /** Give the next match a head start (after a loss on the same island). */
 let retryBoost = false;
+/** The boss robot on boss islands (-1 otherwise). */
+let bossId = -1;
 let nextIsland = false; // the results screen leads on to the world map // your nest fell: you watch the rest of the match
 let phase: Phase = 'menu';
 let human: number | null = null;
@@ -77,6 +81,82 @@ function levelIndex(): number {
   return Math.max(0, Math.min(store.stats.unlocked - 1, i < 0 ? 0 : i));
 }
 
+/** The weekly event island opens once you've reached island 3. */
+function eventOpen(): boolean {
+  return store.stats.unlocked >= 3;
+}
+function eventWon(): boolean {
+  return store.stats.eventWeeks.includes(weekNumber());
+}
+/** Selected island on the world map: a level index, or EVENT_INDEX. */
+function atlasIndex(): number {
+  return store.settings.map === 'event' && eventOpen() ? EVENT_INDEX : levelIndex();
+}
+function currentMap(): MapDef {
+  return atlasIndex() === EVENT_INDEX ? eventMap() : LEVEL_MAPS[levelIndex()];
+}
+function musicIndex(): number {
+  return atlasIndex() === EVENT_INDEX ? weekNumber() : levelIndex();
+}
+function eventState(): { open: boolean; won: boolean } {
+  return { open: eventOpen(), won: eventWon() };
+}
+
+/** Today's missions (a new set each day). */
+function missions() {
+  const d = today();
+  if (!store.stats.missions || store.stats.missions.day !== d) {
+    store.stats.missions = dailyMissions(d);
+    store.save();
+  }
+  return store.stats.missions;
+}
+
+function buildMissions(): void {
+  const ms = missions();
+  const done = ms.list.filter((m) => m.done).length;
+  $('missionsBadge').textContent = `${done}/3`;
+  $('missionsBtn').classList.toggle('all-done', done === 3);
+  $('missionList').innerHTML = ms.list
+    .map(
+      (m) => `<div class="mission${m.done ? ' done' : ''}">
+        <div class="m-text">${missionText(m)}</div>
+        <div class="m-bar"><i style="width:${(m.progress / m.target) * 100}%"></i></div>
+        <div class="m-reward">${m.done ? 'Done' : `<span class="coin-ico"></span>${m.reward}`}</div></div>`,
+    )
+    .join('');
+}
+
+/** The 7-day gift: once a day, shown when the world map opens. */
+function maybeShowGift(): void {
+  const g = store.stats.gift;
+  if (g.last === today() || phase !== 'menu') return;
+  const day = g.count % 7;
+  const golden = day === 6 && !store.stats.owned.includes(GIFT_SKIN);
+  $('giftDays').innerHTML = GIFT_COINS.map(
+    (c, k) => `<div class="gday${k < day ? ' got' : k === day ? ' today' : ''}"><small>Day ${k + 1}</small>${k === 6 ? '<span class="gift-ico"></span>' : `<span class="coin-ico"></span>${c}`}</div>`,
+  ).join('');
+  $('giftPrize').textContent = golden ? 'Today: the Golden skin!' : `Today: ${GIFT_COINS[day]} coins`;
+  $('gift').classList.remove('hidden');
+  $('giftClaim').onclick = () => {
+    sound.unlock();
+    if (golden) {
+      store.stats.owned.push(GIFT_SKIN);
+      store.settings.skin = GIFT_SKIN;
+      sound.star(2);
+    } else {
+      store.stats.coins += GIFT_COINS[day];
+      sound.coin();
+    }
+    g.last = today();
+    g.count++;
+    store.save();
+    $('gift').classList.add('hidden');
+    vibrate(30);
+    openWorldMap();
+  };
+}
+
 function beatenCount(): number {
   return store.stats.champion ? LEVEL_MAPS.length : store.stats.unlocked - 1;
 }
@@ -88,7 +168,7 @@ function equippedSkin(): number {
 }
 
 function skinOwned(k: number): boolean {
-  return SKINS[k].unlockAt <= beatenCount() || store.stats.owned.includes(k);
+  return (!SKINS[k].special && SKINS[k].unlockAt <= beatenCount()) || store.stats.owned.includes(k);
 }
 
 function updateCoins(): void {
@@ -104,12 +184,22 @@ function buildSkinPicker(): void {
     const price = skinPrice(k);
     b.className = 'skin-card' + (k === equippedSkin() ? ' selected' : '') + (locked ? ' locked' : '');
     const swatch = [sk.body ?? '#ffffff', sk.deck, ...(sk.trailColors.length ? [sk.trailColors[0]] : [sk.tips])];
-    b.innerHTML = `<span class="sw">${swatch.map((c) => `<i style="background:${c}"></i>`).join('')}</span><b>${sk.name}</b><small>${locked ? `Island ${sk.unlockAt} or <span class="coin-ico"></span>${price}` : k === equippedSkin() ? 'Equipped' : 'Tap to wear'}</small>`;
+    b.innerHTML = `<span class="sw">${swatch.map((c) => `<i style="background:${c}"></i>`).join('')}</span><b>${sk.name}</b><small>${
+      locked
+        ? sk.special === 'event'
+          ? 'Weekly event'
+          : sk.special === 'gift'
+            ? 'Day 7 gift'
+            : `Island ${sk.unlockAt} or <span class="coin-ico"></span>${price}`
+        : k === equippedSkin()
+          ? 'Equipped'
+          : 'Tap to wear'
+    }</small>`;
     b.onclick = () => {
       sound.unlock();
       if (locked) {
-        // Buy it early with coins.
-        if (store.stats.coins < price) {
+        // Buy it early with coins (event and gift skins can't be bought).
+        if (sk.special || store.stats.coins < price) {
           sound.empty();
           b.classList.remove('shake');
           void b.offsetWidth;
@@ -135,15 +225,20 @@ function buildSkinPicker(): void {
 let pendingTravel: { from: number; to: number } | null = null;
 
 function showIslandCard(): void {
-  const i = levelIndex();
-  const m = LEVEL_MAPS[i];
-  $('levelTag').textContent = `Island ${i + 1} of ${LEVEL_MAPS.length}` + (i < beatenCount() ? '  ·  won' : '');
+  const i = atlasIndex();
+  const m = currentMap();
+  const world = i < 8 ? 'World 1' : 'World 2';
+  $('levelTag').textContent =
+    i === EVENT_INDEX
+      ? `Weekly event${eventWon() ? '  ·  won' : `  ·  prize: ${SKINS[eventSkinIndex(weekNumber())].name} skin`}`
+      : `${world} · Island ${i + 1} of ${LEVEL_MAPS.length}${m.boss ? ' · Boss' : ''}` + (i < beatenCount() ? '  ·  won' : '');
   $('islandName').textContent = m.name;
   $('islandName').style.color = m.theme.ui;
   $('islandBlurb').textContent = m.blurb;
   const st = store.stats.stars[m.id] ?? 0;
   $('islandStars').innerHTML = [0, 1, 2].map((k) => `<i class="star${k < st ? ' on' : ''}"></i>`).join('');
   updateCoins();
+  buildMissions();
 }
 
 function openWorldMap(): void {
@@ -156,13 +251,14 @@ function openWorldMap(): void {
   if (trip) {
     // Stand on the island just won, then ride to the next one; the Play card pops up on arrival.
     store.settings.map = LEVEL_MAPS[trip.from].id;
-    atlas.setState(store.stats.unlocked, beatenCount(), trip.from, store.settings.slot, equippedSkin());
+    atlas.setState(store.stats.unlocked, beatenCount(), trip.from, store.settings.slot, equippedSkin(), eventState());
     store.settings.map = LEVEL_MAPS[trip.to].id;
     store.save();
     title.classList.add('traveling');
     window.setTimeout(() => {
       sound.whoosh();
       atlas.travel(trip.from, trip.to, () => {
+        window.setTimeout(maybeShowGift, 600);
         sound.setMusicStyle(trip.to, true);
         sound.heartGained();
         title.classList.remove('traveling');
@@ -173,7 +269,8 @@ function openWorldMap(): void {
     }, 700);
   } else {
     title.classList.remove('traveling');
-    atlas.setState(store.stats.unlocked, beatenCount(), levelIndex(), store.settings.slot, equippedSkin());
+    atlas.setState(store.stats.unlocked, beatenCount(), atlasIndex(), store.settings.slot, equippedSkin(), eventState());
+    window.setTimeout(maybeShowGift, 500);
   }
   showIslandCard();
 }
@@ -203,30 +300,31 @@ function setupMapTouch(): void {
     const i = atlas.pick((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
     if (i < 0) return;
     sound.unlock();
-    if (i >= store.stats.unlocked) {
+    const locked = i === EVENT_INDEX ? !eventOpen() : i >= store.stats.unlocked;
+    if (locked) {
       sound.empty();
       vibrate(30);
       const card = $('title').querySelector('.map-bottom') as HTMLElement;
       card.classList.remove('shake');
       void card.offsetWidth;
       card.classList.add('shake');
-      $('islandBlurb').textContent = `Win island ${store.stats.unlocked} to unlock ${LEVEL_MAPS[i].name}!`;
+      $('islandBlurb').textContent = i === EVENT_INDEX ? 'Reach island 3 to open the weekly event!' : `Win island ${store.stats.unlocked} to unlock ${LEVEL_MAPS[i].name}!`;
       return;
     }
     sound.click();
     const from = atlas.current;
-    store.settings.map = LEVEL_MAPS[i].id;
+    store.settings.map = i === EVENT_INDEX ? 'event' : LEVEL_MAPS[i].id;
     store.save();
     if (from === i) {
       atlas.drag(0, 0);
-      atlas.setState(store.stats.unlocked, beatenCount(), i, store.settings.slot, equippedSkin());
+      atlas.setState(store.stats.unlocked, beatenCount(), i, store.settings.slot, equippedSkin(), eventState());
       return;
     }
     $('title').classList.add('traveling');
     sound.startMusic();
     sound.whoosh();
     atlas.travel(from, i, () => {
-      sound.setMusicStyle(i, true);
+      sound.setMusicStyle(musicIndex(), true);
       $('title').classList.remove('traveling');
       showIslandCard();
     });
@@ -289,7 +387,7 @@ function applySettings(): void {
 function newGame(humanSlot: number | null, tutorial = false): void {
   const opts: MatchOptions = {
     tutorial,
-    map: LEVEL_MAPS[levelIndex()].id,
+    map: currentMap().id,
     startMode: store.settings.startMode,
     hardMode: store.settings.hardMode,
     humanSlot,
@@ -301,10 +399,13 @@ function newGame(humanSlot: number | null, tutorial = false): void {
   if (!tutorial) {
     const bots = new Bots(game, 0.5);
     // No difficulty menu: the director picks how kind the bots are from recent results.
-    if (humanSlot !== null) director = new Director(game, bots, humanSlot, pickMood(store.stats.recent));
+    // Boss islands: the robot opposite you is the boss, with extra egg hearts.
+    bossId = game.map.boss && humanSlot !== null ? (humanSlot + 2) % 4 : -1;
+    if (bossId >= 0) game.cores[bossId].hearts = 5;
+    if (humanSlot !== null) director = new Director(game, bots, humanSlot, pickMood(store.stats.recent), bossId);
   }
   combo = { lastCapture: -99, bonkedBy: -1, bonkedAt: -99, cuts: 0 };
-  log = { heartsLost: 0, bonked: 0, stolen: false, outlasted: 0 };
+  log = { heartsLost: 0, bonked: 0, stolen: false, outlasted: 0, combos: 0 };
   captureChain = 0;
   humanOut = false;
   hud.setSpectating(false);
@@ -316,8 +417,11 @@ function newGame(humanSlot: number | null, tutorial = false): void {
   human = humanSlot;
   // You wear your skin; the bots show off others (a peek at what you can unlock).
   const lvl = levelIndex();
-  const skins = game.players.map((p) => (p.id === humanSlot ? equippedSkin() : 1 + ((lvl + p.id * 3) % (SKINS.length - 1))));
-  world.setGame(game, skins);
+  const botSkins = SKINS.map((sk, k) => (sk.special || k === 0 ? -1 : k)).filter((k) => k > 0);
+  const skins = game.players.map((p) =>
+    p.id === humanSlot ? equippedSkin() : p.id === bossId ? SKINS.findIndex((sk) => sk.id === 'lava') : botSkins[(lvl + p.id * 3) % botSkins.length],
+  );
+  world.setGame(game, skins, bossId);
   world.mode = humanSlot === null ? 'orbit' : 'follow';
   world.followId = humanSlot ?? 0;
   hud.build(game, humanSlot);
@@ -330,8 +434,9 @@ function startAttract(): void {
   replayLeft = -1;
   againBtn.textContent = 'Play again';
   hud.show(false);
-  sound.setMusicStyle(levelIndex(), true);
+  sound.setMusicStyle(musicIndex(), true);
   sound.setLeading(false);
+  sound.setTension(0);
   sound.startMusic();
   openWorldMap();
   applySettings();
@@ -341,11 +446,12 @@ function startAttract(): void {
 
 function startMatch(): void {
   sound.unlock();
-  sound.setMusicStyle(levelIndex(), false);
+  sound.setMusicStyle(musicIndex(), false);
   sound.startMusic();
   newGame(store.settings.slot);
   world.showAtlas = false;
   world.startSwoop();
+  if (bossId >= 0) window.setTimeout(() => hud.toast('Boss island! Beat the big robot', true), 3300);
   if (retryBoost && human !== null) {
     // Second try on the same island: a head start, and we say so.
     const me = game.players[human];
@@ -385,7 +491,7 @@ function setCoach(text: string, finger: 'drag' | 'tap' | 'none'): void {
 
 function startTutorial(): void {
   sound.unlock();
-  sound.setMusicStyle(levelIndex(), false);
+  sound.setMusicStyle(musicIndex(), false);
   sound.startMusic();
   newGame(store.settings.slot, true);
   world.showAtlas = false;
@@ -467,10 +573,6 @@ function vibrate(ms: number): void {
   if (store.settings.vibrate && navigator.vibrate) navigator.vibrate(ms);
 }
 
-function nameOf(id: number): string {
-  return id === human ? 'You' : game.players[id].name;
-}
-
 function handleEvents(events: GameEvent[]): void {
   world.handleEvents(events, human);
   if (phase === 'menu') return; // attract mode is silent
@@ -489,7 +591,10 @@ function handleEvents(events: GameEvent[]): void {
           sound.thump(Math.min(1, pct / 6));
           world.kickCamera(Math.min(1, 0.25 + pct / 6));
           vibrate(pct >= 3 ? 60 : 20);
-          if (game.time - combo.lastCapture < 6) hud.combo('Double grab!', '#ff9f1c');
+          if (game.time - combo.lastCapture < 6) {
+            hud.combo('Double grab!', '#ff9f1c');
+            log.combos++;
+          }
           else if (pct >= 4) hud.combo(`Huge grab! +${pct.toFixed(0)}%`, PLAYER_COLORS[me]);
           combo.lastCapture = game.time;
         }
@@ -499,7 +604,7 @@ function handleEvents(events: GameEvent[]): void {
           log.bonked++;
           sound.bonk();
           vibrate(120);
-          hud.toast(e.by === me ? 'Oops! Bonked by your own trail' : e.by === e.victim ? 'Swallowed by the clouds!' : `${nameOf(e.by)} cut your trail!`);
+          hud.toast(e.by === me ? 'Oops! Bonked by your own trail' : e.by === e.victim ? 'Swallowed by the clouds!' : 'Your trail was cut!');
           if (e.by !== me && e.by !== e.victim) {
             combo.bonkedBy = e.by;
             combo.bonkedAt = game.time;
@@ -513,7 +618,7 @@ function handleEvents(events: GameEvent[]): void {
             hud.combo('Revenge!', '#e8436f');
             combo.bonkedBy = -1;
           } else if (combo.cuts === 3) hud.combo('Trail hunter!', '#7048e8');
-          else hud.toast(`You bonked ${nameOf(e.victim)}!`);
+          else hud.toast('Bonk!');
         }
         break;
       case 'shielded':
@@ -525,7 +630,7 @@ function handleEvents(events: GameEvent[]): void {
           log.heartsLost++;
           sound.heartLost();
           vibrate(60);
-          hud.toast(`${nameOf(e.by)} is attacking your egg!`);
+          hud.toast('Your egg is under attack!');
         } else if (e.by === me) sound.heartLost();
         break;
       case 'heartRegen':
@@ -536,11 +641,11 @@ function handleEvents(events: GameEvent[]): void {
         if (e.owner === me) {
           log.stolen = true;
           vibrate(200);
-          hud.toast(`${nameOf(e.by)} stole your egg! Bump them!`, true);
+          hud.toast('Your egg was stolen! Bump the thief!', true);
         } else if (e.by === me) {
           hud.combo('Egg grabbed!', '#f08c00');
           hud.toast('Ride to your colour to keep it!');
-        } else hud.toast(`${nameOf(e.by)} nabbed ${nameOf(e.owner)}'s egg!`);
+        }
         break;
       case 'eggDropped':
         sound.drop();
@@ -563,7 +668,7 @@ function handleEvents(events: GameEvent[]): void {
           input.enabled = false;
           world.mode = 'overview';
           hud.setSpectating(true);
-        } else hud.toast(`${nameOf(e.by)} captured ${nameOf(e.owner)}!`);
+        }
         break;
       case 'voidRing':
         sound.rumble();
@@ -578,7 +683,6 @@ function handleEvents(events: GameEvent[]): void {
       case 'power':
         sound.power();
         if (e.pid === me) hud.toast(e.power === 'speed' ? 'Zoom zoom!' : e.power === 'shield' ? 'Bubble shield!' : 'Clouds frozen!', true);
-        else if (e.power === 'freeze') hud.toast(`${nameOf(e.pid)} froze the clouds`);
         break;
       case 'throw':
         if (e.pid === me) sound.whoosh();
@@ -589,8 +693,8 @@ function handleEvents(events: GameEvent[]): void {
       case 'stun':
         if (e.pid === me) {
           vibrate(80);
-          hud.toast(`Bonked by ${nameOf(e.by)}'s ball!`);
-        } else if (e.by === me) hud.toast(`Hit ${nameOf(e.pid)}!`);
+          hud.toast('Splat! You got hit');
+        } else if (e.by === me) hud.toast('Direct hit!');
         break;
       case 'pickup':
         if (e.pid === me) {
@@ -617,8 +721,9 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   const won = winner === human;
   if (won) sound.win();
   else sound.lose();
-  hud.toast(won ? 'You win!' : `${nameOf(winner)} wins!`, true);
+  hud.toast(won ? 'You win!' : 'Match over', true);
   if (won && game.map.id === LEVEL_MAPS[LEVEL_MAPS.length - 1].id) window.setTimeout(() => hud.toast('Champion of every island!', true), 900);
+  else if (won && game.map.id === LEVEL_MAPS[7].id) window.setTimeout(() => hud.toast('World 1 complete! World 2 is open', true), 900);
 
   const st = store.stats;
   const peakPct = (id: number) => (game.players[id].stats.peakLand / game.totalCells) * 100;
@@ -648,11 +753,13 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   card.classList.toggle('lost', !won);
   const order = game.ranking();
   let reward = null as ReturnType<typeof rewardFor> | null;
+  let eventSkinWon = -1;
+  const missionLines: string[] = [];
   if (me !== null) {
     const rivals = game.players.filter((p) => p.id !== me);
     const rival = rivals.reduce((a, b) => (game.percent(b.id) > game.percent(a.id) ? b : a));
     const rank = humanOut ? 4 - log.outlasted : order.indexOf(me) + 1;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayStr();
     reward = rewardFor({
       won,
       rank,
@@ -672,9 +779,32 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
     });
     if (won) st.lastWinDay = today;
     st.coins += reward.coins;
+    // Weekly event: the first win this week gives the event skin (or coins if you have it).
+    if (won && game.map.id === 'event' && !st.eventWeeks.includes(weekNumber())) {
+      st.eventWeeks.push(weekNumber());
+      const ev = eventSkinIndex(weekNumber());
+      if (!st.owned.includes(ev)) {
+        st.owned.push(ev);
+        eventSkinWon = ev;
+      } else st.coins += 100;
+    }
+    // Daily missions.
+    const finished = applyMatch(missions(), {
+      won,
+      peakPct: peakPct(me),
+      eggsTaken: game.players[me].stats.captures,
+      trailsCut: game.players[me].stats.bonks,
+      throws: game.players[me].stats.throws,
+      stars: reward.stars,
+      combos: log.combos,
+    });
+    for (const m of finished) {
+      st.coins += m.reward;
+      missionLines.push(`Mission done: ${missionText(m)} +${m.reward}`);
+    }
     if (lvl >= 0) st.stars[game.map.id] = Math.max(st.stars[game.map.id] ?? 0, reward.stars);
     // A loss on this island earns a head start on the next try here.
-    retryBoost = !won && lvl >= 0;
+    retryBoost = !won && (lvl >= 0 || game.map.id === 'event');
     store.save();
 
     $('resultTitle').textContent = reward.title;
@@ -720,17 +850,20 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   // What's next: unlocks first, then the nearest goal.
   const lines: string[] = [];
   if (unlockedNew) lines.push(`${LEVEL_MAPS[lvl + 1].name} unlocked!`);
-  const skinsNow = beatenCount();
-  if (skinsNow > skinsBefore && SKINS[skinsNow]) {
+  const beatNow = beatenCount();
+  const fresh = beatNow > skinsBefore ? SKINS.findIndex((sk) => !sk.special && sk.unlockAt > skinsBefore && sk.unlockAt <= beatNow) : -1;
+  const newSkin = fresh > 0 ? fresh : eventSkinWon;
+  if (newSkin > 0) {
     // New skin: wear it straight away (it can be changed under Style).
-    store.settings.skin = skinsNow;
+    store.settings.skin = newSkin;
     store.save();
-    lines.push(`New skin: ${SKINS[skinsNow].name}!`);
-    window.setTimeout(() => hud.toast(`New skin: ${SKINS[skinsNow].name}!`, true), 1600);
+    lines.push(`New skin: ${SKINS[newSkin].name}!`);
+    window.setTimeout(() => hud.toast(`New skin: ${SKINS[newSkin].name}!`, true), 1600);
   } else {
-    const next = SKINS.findIndex((_, k) => k > 0 && !skinOwned(k));
+    const next = SKINS.findIndex((sk, k) => k > 0 && !sk.special && !skinOwned(k));
     if (next > 0) lines.push(`${SKINS[next].name} skin: ${Math.min(st.coins, skinPrice(next))}/${skinPrice(next)} coins`);
   }
+  lines.push(...missionLines);
   if (!won && retryBoost) lines.push('Retry boost ready: 3 balls + bubble shield');
   $('resultNext').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
 
@@ -774,7 +907,15 @@ $('playBtn').onclick = () => {
   if (!store.settings.tutorialDone && store.stats.games === 0) startTutorial();
   else startMatch();
 };
+$('missionsBtn').onclick = () => {
+  sound.unlock();
+  sound.click();
+  buildMissions();
+  $('missionPanel').classList.toggle('hidden');
+  $('customize').classList.add('hidden');
+};
 $('customBtn').onclick = () => {
+  $('missionPanel').classList.add('hidden');
   sound.unlock();
   sound.click();
   $('customize').classList.toggle('hidden');
@@ -951,6 +1092,7 @@ function loop(now: number): void {
     director?.update(dt);
     sound.setHurry(CONFIG.matchSeconds - game.time < 30);
     sound.setLeading(human !== null && !humanOut && game.time > 5 && game.leader() === human);
+    sound.setTension(world.danger);
     tutorialTick(dt);
     // Heartbeat when your trail is in danger.
     heartbeatTimer -= dt;

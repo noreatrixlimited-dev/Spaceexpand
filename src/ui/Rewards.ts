@@ -71,10 +71,10 @@ export function rewardFor(m: MatchSummary): Reward {
     note = `You outlasted ${m.outlasted} robot${m.outlasted === 1 ? '' : 's'}, so close!`;
   } else if (!m.captured && m.rank === 2 && m.rivalPct - m.finalPct < 10) {
     title = 'So close!';
-    note = `Only ${Math.max(0.1, m.rivalPct - m.finalPct).toFixed(1)}% behind ${m.rivalName}`;
+    note = `Only ${Math.max(0.1, m.rivalPct - m.finalPct).toFixed(1)}% behind 1st place`;
   } else if (m.rank <= 2) {
     title = 'Nearly!';
-    note = `2nd place, ${m.rivalName} just got ahead`;
+    note = '2nd place, just behind the winner';
   } else {
     title = 'Nice try!';
     note = m.outlasted > 0 ? `You outlasted ${m.outlasted} robot${m.outlasted === 1 ? '' : 's'}` : `You grabbed ${m.peakPct.toFixed(0)}% of the island`;

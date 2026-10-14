@@ -172,7 +172,7 @@ export class World {
   private skins: Skin[] = [];
   private trailAcc = [0, 0, 0, 0];
 
-  setGame(game: Game, skins: number[] = []): void {
+  setGame(game: Game, skins: number[] = [], bossId = -1): void {
     this.skins = game.players.map((p) => getSkin(skins[p.id] ?? 0));
     this.matchGroup.traverse((o) => {
       const mesh = o as THREE.Mesh;
@@ -196,6 +196,7 @@ export class World {
     for (const p of game.players) {
       const b: Avatar = this.art ? new Critter(p.id, p.isHuman, this.art.character, this.skins[p.id]) : new Blob(p.id, p.isHuman);
       this.avatars.push(b);
+      if (p.id === bossId) b.root.scale.setScalar(1.4); // the boss is a big robot
       const pos = this.gridPos(p.px, p.py);
       this.avatarPos.push(pos.clone());
       b.root.position.copy(pos);

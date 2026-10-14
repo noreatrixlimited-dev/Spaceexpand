@@ -27,6 +27,10 @@ export interface MapDef {
   wy: number;
   /** A short line shown on the world map. */
   blurb: string;
+  /** World (1 or 2) for island levels; 0 for the practice and event islands. */
+  world: number;
+  /** A boss island: one big, tough robot. */
+  boss: boolean;
   theme: MapTheme;
 }
 
@@ -101,6 +105,26 @@ const THEMES: Record<string, MapTheme> = {
     slabDark: '#9a84d1',
     ui: '#8a6be0',
   },
+  mint: {
+    sky: ['#e8fbf5', '#cff3e7'],
+    water: ['#9ff0d8', '#2fb39a'],
+    neutral: '#fbfffd',
+    neutralPattern: '#e2f6ee',
+    slabTop: '#d9f5ea',
+    slabSide: '#7fd1b4',
+    slabDark: '#5db396',
+    ui: '#2fae8c',
+  },
+  peach: {
+    sky: ['#fff2ea', '#ffe0cf'],
+    water: ['#ffc7a8', '#f28f6a'],
+    neutral: '#fffaf6',
+    neutralPattern: '#fdeadf',
+    slabTop: '#ffe6d6',
+    slabSide: '#f4ab88',
+    slabDark: '#dc8d69',
+    ui: '#ef8a5f',
+  },
   sunset: {
     sky: ['#fff0e3', '#ffd9bd'],
     water: ['#ffb98f', '#f0715a'],
@@ -117,7 +141,21 @@ const THEMES: Record<string, MapTheme> = {
  * The level order: a tour across a made-up ocean. Each island's outline is generated from
  * its seed (a wobbly blob), so every island has its own fixed, original shape.
  */
-const LEVELS: { id: string; name: string; theme: string; blurb: string; seed: number; stretch: number; wobble: number; wx: number; wy: number }[] = [
+interface LevelSpec {
+  id: string;
+  name: string;
+  theme: string;
+  blurb: string;
+  seed: number;
+  stretch: number;
+  wobble: number;
+  wx: number;
+  wy: number;
+  world?: number;
+  boss?: boolean;
+}
+
+const LEVELS: LevelSpec[] = [
   { id: 'clover', name: 'Clover Cove', theme: 'meadow', blurb: 'Green fields and gentle hills.', seed: 11, stretch: 1.0, wobble: 0.16, wx: -30, wy: 20 },
   { id: 'snowpuff', name: 'Snowpuff Isle', theme: 'frost', blurb: 'Ice, snow and very fast boards.', seed: 23, stretch: 1.25, wobble: 0.2, wx: -12, wy: 9 },
   { id: 'honeydrop', name: 'Honeydrop Island', theme: 'honey', blurb: 'Sticky, sunny and sweet.', seed: 37, stretch: 1.1, wobble: 0.24, wx: 8, wy: 16 },
@@ -125,7 +163,16 @@ const LEVELS: { id: string; name: string; theme: string; blurb: string; seed: nu
   { id: 'cocopop', name: 'Cocopop Key', theme: 'tropic', blurb: 'Palm trees and pirate robots.', seed: 59, stretch: 1.15, wobble: 0.27, wx: 14, wy: -12 },
   { id: 'lilac', name: 'Lilac Lagoon', theme: 'lavender', blurb: 'Purple flowers as far as you can see.', seed: 67, stretch: 1.35, wobble: 0.22, wx: -6, wy: -20 },
   { id: 'ember', name: 'Ember Atoll', theme: 'sunset', blurb: 'Hot sand and a big showdown.', seed: 73, stretch: 1.05, wobble: 0.3, wx: -26, wy: -10 },
-  { id: 'starfall', name: 'Starfall Island', theme: 'lagoon', blurb: 'The final island. Become the champion!', seed: 97, stretch: 1.2, wobble: 0.26, wx: -40, wy: -26 },
+  { id: 'starfall', name: 'Starfall Island', theme: 'lagoon', blurb: 'Boss island! Beat the big robot.', seed: 97, stretch: 1.2, wobble: 0.26, wx: -40, wy: -26, boss: true },
+  // World 2: across the northern sea.
+  { id: 'pebble', name: 'Pebble Point', theme: 'mint', blurb: 'World 2 begins. The robots got smarter!', seed: 103, stretch: 1.1, wobble: 0.22, wx: -24, wy: -44, world: 2 },
+  { id: 'peachy', name: 'Peachy Shores', theme: 'peach', blurb: 'Soft sand, sharp robots.', seed: 109, stretch: 1.3, wobble: 0.25, wx: -4, wy: -52, world: 2 },
+  { id: 'bubblegum', name: 'Bubblegum Bay', theme: 'candy', blurb: 'Pop! A bay full of tricks.', seed: 113, stretch: 1.0, wobble: 0.3, wx: 16, wy: -46, world: 2 },
+  { id: 'moonbeam', name: 'Moonbeam Isle', theme: 'lavender', blurb: 'Glows softly at night.', seed: 127, stretch: 1.45, wobble: 0.2, wx: 32, wy: -60, world: 2 },
+  { id: 'coral', name: 'Coral Key', theme: 'tropic', blurb: 'Reefs, waves and sneaky raids.', seed: 131, stretch: 1.15, wobble: 0.28, wx: 14, wy: -74, world: 2 },
+  { id: 'frostbite', name: 'Frostbite Isle', theme: 'frost', blurb: 'Slippery and fast!', seed: 137, stretch: 1.25, wobble: 0.24, wx: -8, wy: -82, world: 2 },
+  { id: 'sunburst', name: 'Sunburst Atoll', theme: 'honey', blurb: 'Hot, bright and busy.', seed: 149, stretch: 1.1, wobble: 0.3, wx: -30, wy: -76, world: 2 },
+  { id: 'crown', name: 'Crown Island', theme: 'sunset', blurb: 'The final boss. Claim the crown!', seed: 157, stretch: 1.2, wobble: 0.26, wx: -48, wy: -92, world: 2, boss: true },
 ];
 
 /** Playable half-extent: every island fits in this, so it fits the board. */
@@ -160,12 +207,36 @@ function blobOutline(seed: number, stretch: number, wobble: number, segments = 1
   return pts;
 }
 
-function buildIsland(l: (typeof LEVELS)[number]): MapDef {
+function buildIsland(l: LevelSpec): MapDef {
   const raw = blobOutline(l.seed, l.stretch, l.wobble);
   const ext = Math.max(...raw.map(([x, y]) => Math.max(Math.abs(x), Math.abs(y))));
   const scale = Math.min(Math.sqrt(TARGET_AREA / Math.abs(polyArea(raw))), MAX_HALF / ext);
   const pts = raw.map(([x, y]) => [x * scale, y * scale] as [number, number]);
-  return { id: l.id, name: l.name, shape: 'island', size: ext * scale, pts, wx: l.wx, wy: l.wy, blurb: l.blurb, theme: THEMES[l.theme] };
+  return { id: l.id, name: l.name, shape: 'island', size: ext * scale, pts, wx: l.wx, wy: l.wy, blurb: l.blurb, world: l.world ?? 1, boss: !!l.boss, theme: THEMES[l.theme] };
+}
+
+/** Week number (Monday-based, since a fixed date) used to rotate the weekly event island. */
+export function weekNumber(now = Date.now()): number {
+  return Math.floor((now - Date.UTC(2024, 0, 1)) / (7 * 24 * 3600 * 1000));
+}
+
+const EVENT_THEMES = ['candy', 'tropic', 'lavender', 'honey', 'mint', 'peach'];
+
+/** The weekly event island: a new shape and colours every week, off the main route. */
+export function eventMap(week = weekNumber()): MapDef {
+  const m = buildIsland({
+    id: 'event',
+    name: 'Festival Isle',
+    theme: EVENT_THEMES[week % EVENT_THEMES.length],
+    blurb: 'Weekly event! Win to get this week\'s special skin.',
+    seed: 1000 + week * 7,
+    stretch: 1 + (week % 4) * 0.12,
+    wobble: 0.2 + (week % 3) * 0.04,
+    wx: -50,
+    wy: 34,
+  });
+  m.world = 0;
+  return m;
 }
 
 /** The island levels, in unlock order. */
@@ -181,12 +252,15 @@ export const PRACTICE_MAP: MapDef = {
   wx: 0,
   wy: 0,
   blurb: '',
+  world: 0,
+  boss: false,
   theme: THEMES.lagoon,
 };
 
 export const MAPS: MapDef[] = [...LEVEL_MAPS, PRACTICE_MAP];
 
 export function getMap(id: string | undefined): MapDef {
+  if (id === 'event') return eventMap();
   return MAPS.find((m) => m.id === id) ?? LEVEL_MAPS[0];
 }
 

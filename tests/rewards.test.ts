@@ -10,7 +10,7 @@ describe('rewards', () => {
   it('a narrow loss is framed as "So close!" with a tip and still pays coins', () => {
     const r = rewardFor(base);
     expect(r.title).toBe('So close!');
-    expect(r.note).toContain('3.0% behind Cherry');
+    expect(r.note).toContain('3.0% behind 1st place');
     expect(r.tip).not.toBe('');
     expect(r.coins).toBeGreaterThan(10);
     expect(r.stars).toBe(0);

@@ -38,7 +38,11 @@ export class Director {
   private timer = 3;
   private tuning: Tuning;
 
-  constructor(game: Game, bots: Bots, human: number, mood: MatchMood) {
+  /** On boss islands one robot is the boss: sharper, faster and with more ammo; the others ease off. */
+  private readonly bossId: number;
+
+  constructor(game: Game, bots: Bots, human: number, mood: MatchMood, bossId = -1) {
+    this.bossId = bossId;
     this.game = game;
     this.bots = bots;
     this.human = human;
@@ -50,9 +54,11 @@ export class Director {
   private apply(): void {
     for (const p of this.game.players) {
       if (p.id === this.human) continue;
-      this.bots.setSkill(this.tuning.skill, p.id);
-      p.speedMul = this.tuning.botSpeed;
-      p.ballRateMul = this.tuning.botBalls;
+      const boss = p.id === this.bossId;
+      const helper = this.bossId >= 0 && !boss;
+      this.bots.setSkill(boss ? Math.max(0.8, this.tuning.skill) : helper ? this.tuning.skill * 0.5 : this.tuning.skill, p.id);
+      p.speedMul = this.tuning.botSpeed * (boss ? 1.08 : helper ? 0.95 : 1);
+      p.ballRateMul = this.tuning.botBalls * (boss ? 1.3 : helper ? 0.8 : 1);
     }
     this.bots.humanBias = this.tuning.bias;
   }

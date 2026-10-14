@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PLAYER_COLORS } from '../config';
 import { Rng } from '../core/rng';
-import { LEVEL_MAPS, mapInset, mapOutline, type MapDef } from '../maps';
+import { eventMap, LEVEL_MAPS, mapInset, mapOutline, type MapDef } from '../maps';
 import { Blob } from './Blob';
 import { Critter } from './Critter';
 import { toon } from './materials';
@@ -11,7 +11,9 @@ import { getSkin } from '../skins';
 /** World-map units per island unit: islands are shown as small models on the big ocean. */
 const S = 0.2;
 const TOP = 0.55; // height of an island's top above the water
-const TRAVEL_TIME = 2.8;
+const TRAVEL_TIME = 2.6;
+/** Index of the weekly event island (it sits after the levels and has no route). */
+export const EVENT_INDEX = LEVEL_MAPS.length;
 
 interface IslandView {
   map: MapDef;
@@ -49,7 +51,7 @@ export class WorldMap {
   private camTarget = new THREE.Vector3();
   private pan = new THREE.Vector3();
   private robotPos = new THREE.Vector3();
-  private travelling: { from: number; to: number; t: number; done: () => void } | null = null;
+  private travelling: { from: number; to: number; t: number; time: number; direct: boolean; done: () => void } | null = null;
   private at = 0;
   /** Seconds left of the arrival bounce. */
   private arrive = 0;
@@ -66,6 +68,7 @@ export class WorldMap {
     this.dotDone = toon(PLAYER_COLORS[slot], { roughness: 0.4 });
     LEVEL_MAPS.forEach((m, i) => this.islands.push(this.buildIsland(m, i)));
     this.buildPaths();
+    this.islands.push(this.buildIsland(eventMap(), EVENT_INDEX));
     this.buildDecor();
     this.robot = this.makeRobot(slot, skin);
   }
@@ -175,7 +178,8 @@ export class WorldMap {
     flag.position.set(m.size * S * 0.35, TOP, -m.size * S * 0.2);
     g.add(flag);
 
-    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(`${index + 1}. ${m.name}`, m.theme.ui), depthTest: false }));
+    const text = index === EVENT_INDEX ? `Weekly: ${m.name}` : `${index + 1}. ${m.name}${m.boss ? ' (Boss)' : ''}`;
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(text, m.theme.ui), depthTest: false }));
     label.center.set(0.5, 1);
     label.scale.set(8.4, 2.1, 1);
     label.position.set(0, TOP, m.size * S + 1.4);
@@ -194,11 +198,15 @@ export class WorldMap {
 
   /** The curved sea route from island i to island i + 1. */
   private route(i: number): THREE.QuadraticBezierCurve3 {
-    const a = this.islands[i].pos;
-    const b = this.islands[i + 1].pos;
+    return this.curve(i, i + 1, i % 2 ? 0.22 : -0.22);
+  }
+
+  private curve(from: number, to: number, bendBy: number): THREE.QuadraticBezierCurve3 {
+    const a = this.islands[from].pos;
+    const b = this.islands[to].pos;
     const mid = a.clone().lerp(b, 0.5);
     const dir = b.clone().sub(a);
-    const bend = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(i % 2 ? 0.22 : -0.22);
+    const bend = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(bendBy);
     return new THREE.QuadraticBezierCurve3(a.clone(), mid.add(bend), b.clone());
   }
 
@@ -227,9 +235,9 @@ export class WorldMap {
     // Tiny uninhabited islets to fill the ocean.
     const sand = toon('#fbeec8', { roughness: 0.9 });
     const palm = toon('#7cc576', { roughness: 0.8 });
-    for (let k = 0; k < 22; k++) {
-      const x = -70 + rng.next() * 120;
-      const z = -50 + rng.next() * 90;
+    for (let k = 0; k < 40; k++) {
+      const x = -75 + rng.next() * 125;
+      const z = -110 + rng.next() * 160;
       if (this.islands.some((v) => Math.hypot(v.pos.x - x, v.pos.z - z) < v.map.size * S + 4)) continue;
       const r = 0.6 + rng.next() * 1.1;
       const islet = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.15, 0.5, 14), sand);
@@ -244,7 +252,7 @@ export class WorldMap {
     }
     // Soft clouds drifting over the sea.
     const white = toon('#ffffff', { roughness: 1, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.45, transparent: true, opacity: 0.92 });
-    for (let k = 0; k < 9; k++) {
+    for (let k = 0; k < 16; k++) {
       const c = new THREE.Group();
       for (let p = 0; p < 4; p++) {
         const puff = new THREE.Mesh(new THREE.SphereGeometry(1 + rng.next() * 0.8, 12, 10), white);
@@ -252,7 +260,7 @@ export class WorldMap {
         puff.scale.y = 0.6;
         c.add(puff);
       }
-      c.position.set(-70 + rng.next() * 120, 7 + rng.next() * 4, -50 + rng.next() * 90);
+      c.position.set(-70 + rng.next() * 120, 7 + rng.next() * 4, -110 + rng.next() * 160);
       c.userData.speed = 0.4 + rng.next() * 0.5;
       this.clouds.push(c);
       this.scene.add(c);
@@ -260,18 +268,18 @@ export class WorldMap {
   }
 
   /** Show progress: `unlocked` islands are playable, those before `beaten` have a flag. */
-  setState(unlocked: number, beaten: number, selected: number, slot: number, skin = 0): void {
+  setState(unlocked: number, beaten: number, selected: number, slot: number, skin = 0, event: { open: boolean; won: boolean } = { open: false, won: false }): void {
     if (slot !== this.robotSlot || skin !== this.robotSkin) {
       this.robot = this.makeRobot(slot, skin);
       this.dotDone.color.set(PLAYER_COLORS[slot]);
     }
     this.islands.forEach((v, i) => {
-      const locked = i >= unlocked;
+      const locked = i === EVENT_INDEX ? !event.open : i >= unlocked;
       v.top.color.set(locked ? GREY.clone().lerp(new THREE.Color('#ffffff'), 0.5) : v.map.theme.neutral);
       v.side.color.set(locked ? GREY : v.map.theme.slabSide);
       for (const d of v.deco) d.color.set(locked ? GREY.clone().multiplyScalar(0.9) : v.map.theme.slabSide);
       v.lock.visible = locked;
-      v.flag.visible = i < beaten;
+      v.flag.visible = i === EVENT_INDEX ? event.won : i < beaten;
       const cloth = v.flag.getObjectByName('cloth') as THREE.Mesh;
       (cloth.material as THREE.MeshStandardMaterial).color.set(PLAYER_COLORS[slot]);
       v.label.material.opacity = locked ? 0.6 : 1;
@@ -296,7 +304,9 @@ export class WorldMap {
       return;
     }
     this.pan.set(0, 0, 0);
-    this.travelling = { from, to, t: 0, done };
+    const direct = from === EVENT_INDEX || to === EVENT_INDEX;
+    const legs = direct ? 1 : Math.abs(to - from);
+    this.travelling = { from, to, t: 0, time: Math.min(6, TRAVEL_TIME + (legs - 1) * 0.5), direct, done };
   }
 
   /** Which island is under a screen point (or -1). */
@@ -332,16 +342,16 @@ export class WorldMap {
     let moving = false;
     const tr = this.travelling;
     if (tr) {
-      tr.t += dt / TRAVEL_TIME;
-      const step = tr.to > tr.from ? 1 : -1;
-      const legs = Math.abs(tr.to - tr.from);
+      tr.t += dt / tr.time;
+      const step = tr.direct || tr.to > tr.from ? 1 : -1;
+      const legs = tr.direct ? 1 : Math.abs(tr.to - tr.from);
       const u = Math.min(1, tr.t);
       // ease in and out over the whole trip, leg by leg
       const e = u * u * (3 - 2 * u) * legs;
       const leg = Math.min(legs - 1, Math.floor(e));
       const f = e - leg;
       const a = tr.from + leg * step;
-      const curve = step > 0 ? this.route(a) : this.route(a - 1);
+      const curve = tr.direct ? this.curve(tr.from, tr.to, 0.15) : step > 0 ? this.route(a) : this.route(a - 1);
       const p = curve.getPointAt(step > 0 ? f : 1 - f);
       const ahead = curve.getPointAt(Math.min(1, Math.max(0, step > 0 ? f + 0.02 : 1 - f - 0.02)));
       // up on the islands at both ends, down on the waves in between

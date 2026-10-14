@@ -1533,3 +1533,110 @@ button:active {
 .skin-card.shake {
   animation: shake 0.4s ease;
 }
+
+/* ---------- missions & gift ---------- */
+#missionsBtn b {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 12px;
+  background: var(--pink);
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+#missionsBtn.all-done b {
+  background: var(--mint);
+}
+.map-screen #missionPanel .label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 10px 0 6px;
+}
+.missions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+.mission {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 8px 10px;
+  box-shadow: 0 2px 0 rgba(74, 54, 84, 0.1);
+}
+.mission .m-text {
+  font-size: 13px;
+  font-weight: 600;
+}
+.mission .m-bar {
+  grid-row: 2;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 3px;
+  background: #eee6f0;
+  overflow: hidden;
+}
+.mission .m-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ffb703, #ff8fb1);
+}
+.mission .m-reward {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  font-weight: 700;
+  color: #b07a00;
+  font-size: 14px;
+}
+.mission.done {
+  opacity: 0.7;
+}
+.mission.done .m-reward {
+  color: #2f9e6f;
+}
+.gift-card {
+  text-align: center;
+}
+.gift-days {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 10px 0;
+}
+.gday {
+  background: #fff;
+  border-radius: 12px;
+  padding: 6px 2px;
+  font-weight: 700;
+  color: #b07a00;
+  box-shadow: 0 2px 0 rgba(74, 54, 84, 0.1);
+}
+.gday small {
+  display: block;
+  font-size: 10px;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.gday.got {
+  opacity: 0.45;
+}
+.gday.today {
+  outline: 3px solid var(--yellow);
+  animation: breathe 1.4s ease-in-out infinite;
+}
+.gift-ico {
+  display: inline-block;
+  width: 1.3em;
+  height: 1.3em;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fffbe0, #ffe27a 45%, #e8b400);
+  box-shadow: 0 0 10px #ffd43b;
+}
