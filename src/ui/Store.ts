@@ -29,6 +29,13 @@ export interface Stats {
   unlocked: number;
   /** Won the final island. */
   champion: boolean;
+  coins: number;
+  /** Best stars (0-3) per island id. */
+  stars: Record<string, number>;
+  /** Day (YYYY-MM-DD) of the last win, for the first-win-of-the-day bonus. */
+  lastWinDay: string;
+  /** Skins bought early with coins. */
+  owned: number[];
 }
 
 const KEY = 'nestnappers.v1';
@@ -50,7 +57,7 @@ const defaults = (): { settings: Settings; stats: Stats } => ({
     tutorialDone: false,
     skin: 0,
   },
-  stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '', unlocked: 1, champion: false },
+  stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '', unlocked: 1, champion: false, coins: 0, stars: {}, lastWinDay: '', owned: [] },
 });
 
 /** Settings and lifetime stats, saved in localStorage (best effort). */

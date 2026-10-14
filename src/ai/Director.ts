@@ -2,24 +2,20 @@ import type { Game } from '../core/Game';
 import type { Bots } from './Bot';
 
 /**
- * Invisible difficulty: there is no Easy/Normal/Hard choice. Each match picks a mood
- * from the player's recent results and keeps nudging the bots while it plays.
+ * Invisible difficulty: there is no Easy/Normal/Hard choice. The match rhythm is
+ * win -> close loss -> comeback win:
  *
- * - mercy: after losses (and in the very first match) the bots go easy and mostly
- *   leave the player alone, so the player gets a win.
- * - challenge: after two wins in a row the bots sharpen up and gang up on the
- *   player, so the streak usually ends.
- * - normal: rubber-banding keeps the match close.
+ * - mercy: the first match and any match after a loss. The bots go easy and mostly
+ *   leave the player alone, so the comeback (with the retry boost) is a win.
+ * - close: the match after a win. The bots keep pace just ahead of the player, so it
+ *   usually ends as a near miss ("So close!") rather than a crushing loss; a player
+ *   who outplays them can still win it.
  */
-export type MatchMood = 'mercy' | 'normal' | 'challenge';
+export type MatchMood = 'mercy' | 'close';
 
-/** `recent` is the player's results, oldest first, e.g. "WLWW". */
+/** `recent` is the player's results, oldest first, e.g. "WLW". */
 export function pickMood(recent: string): MatchMood {
-  if (recent.length === 0) return 'mercy';
-  if (recent.endsWith('LL')) return 'mercy';
-  if (recent.endsWith('L') && recent.length < 3) return 'mercy';
-  if (recent.endsWith('WW')) return 'challenge';
-  return 'normal';
+  return recent.endsWith('W') ? 'close' : 'mercy';
 }
 
 interface Tuning {
@@ -31,8 +27,7 @@ interface Tuning {
 
 const START: Record<MatchMood, Tuning> = {
   mercy: { skill: 0.05, bias: 0.25, botSpeed: 0.9, botBalls: 0.6 },
-  normal: { skill: 0.5, bias: 1, botSpeed: 1, botBalls: 1 },
-  challenge: { skill: 1, bias: 1.7, botSpeed: 1.05, botBalls: 1.2 },
+  close: { skill: 0.85, bias: 1.3, botSpeed: 1.03, botBalls: 1.15 },
 };
 
 export class Director {
@@ -75,6 +70,7 @@ export class Director {
     const t = { ...START[this.mood] };
 
     if (this.mood === 'mercy') {
+      this.bots.spareHumanNest = true;
       // Make sure the player ends up on top: the further behind, the gentler the bots.
       if (ratio < 1) {
         const behind = Math.min(1, (1 - ratio) * 1.5 + (late ? 0.3 : 0));
@@ -83,27 +79,23 @@ export class Director {
         t.botSpeed = 0.9 - 0.1 * behind;
         t.botBalls = 0.6 - 0.3 * behind;
       }
-    } else if (this.mood === 'challenge') {
-      // Push hard while the player leads; ease off only if they're crushed.
-      if (ratio >= 1) {
-        t.bias = late ? 2.4 : 2;
-        t.botSpeed = late ? 1.08 : 1.05;
-        t.botBalls = 1.4;
-      } else if (ratio < 0.4) {
-        t.bias = 1.1;
-        t.botSpeed = 1;
-      }
     } else {
-      // Normal: rubber-band toward a close match.
-      if (ratio < 0.6) {
-        t.skill = 0.3;
-        t.bias = 0.6;
-        t.botSpeed = 0.97;
-      } else if (ratio > 1.5) {
-        t.skill = 0.75;
-        t.bias = 1.4;
-        t.botSpeed = 1.02;
+      // Close: stay just ahead. Push when the player catches up, ease off when they fall
+      // far behind, and don't finish their nest off early (a near miss beats a knockout).
+      if (ratio >= 0.95) {
+        t.skill = 1;
+        t.bias = late ? 2.3 : 1.9;
+        t.botSpeed = late ? 1.07 : 1.05;
+        t.botBalls = 1.35;
+      } else if (ratio < 0.7) {
+        t.skill = 0.35;
+        t.bias = 0.5;
+        t.botSpeed = 0.96;
+        t.botBalls = 0.8;
       }
+      if (g.cores[this.human].hearts <= 1 && g.time < 150) t.bias = Math.min(t.bias, 0.35);
+      // Fair fight for the nest: the match usually ends in a final duel the player narrowly loses.
+      this.bots.spareHumanNest = false;
     }
     this.tuning = t;
     this.apply();

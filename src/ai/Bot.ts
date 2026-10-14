@@ -34,6 +34,8 @@ export class Bots {
   /** The human player (if any) and how much bots go after them: <1 leave them alone, >1 gang up. */
   readonly humanId: number | null;
   humanBias = 1;
+  /** When set, bots leave the human's nest alone (the director uses this to avoid knockouts). */
+  spareHumanNest = false;
   private readonly mode: Mode[] = ['idle', 'idle', 'idle', 'idle'];
   private readonly lastThink = [-1, -1, -1, -1];
 
@@ -216,6 +218,7 @@ export class Bots {
       let bestPath: number[] | null = null;
       for (const c of game.cores) {
         if (c.owner === p.id || c.state !== 'nest' || this.isAlly(p, c.owner) || !this.targets(c.owner)) continue;
+        if (this.spareHumanNest && c.owner === this.humanId) continue;
         const ci = g.idx(c.x, c.y);
         const route = this.path(p, (i) => manhattan(g, i, ci) <= CONFIG.nestReach - 1, prm.coreRange * Math.max(1, this.humanWeight(c.owner)));
         if (!route) continue;

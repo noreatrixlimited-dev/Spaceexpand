@@ -34,9 +34,11 @@
     <!-- Title -->
     <section id="title" class="screen map-screen">
       <div class="map-top"><h1 class="logo" id="logo">Nestnappers</h1></div>
+      <div id="coinPill" class="coin-pill">0</div>
       <div class="card map-bottom">
         <div id="levelTag" class="level-tag">Island 1 of 8</div>
         <h2 id="islandName" class="island-name">Clover Cove</h2>
+        <div id="islandStars" class="stars small"></div>
         <p id="islandBlurb" class="tagline"></p>
         <button id="playBtn" class="btn big primary">Play</button>
         <div class="row tools">
@@ -107,9 +109,13 @@
     <section id="results" class="screen hidden">
       <div class="card">
         <h2 id="resultTitle">You win!</h2>
+        <div id="resultStars" class="stars"></div>
         <div id="resultBig" class="result-big"></div>
         <p id="resultReason" class="tagline"></p>
+        <p id="resultTip" class="result-tip"></p>
         <div id="ranking" class="ranking"></div>
+        <div id="resultCoins" class="result-coins"></div>
+        <div id="resultNext" class="result-next"></div>
         <div id="myStats" class="my-stats"></div>
         <div class="row">
           <button id="againBtn" class="btn primary">Play again</button>

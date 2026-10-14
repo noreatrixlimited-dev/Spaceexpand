@@ -293,12 +293,15 @@ export class Sound {
     this.lastTrail = now;
     this.tone(1500 + Math.random() * 400, 0.04, { type: 'sine', vol: 0.035 });
   }
-  capture(size: number): void {
+  capture(size: number, chain = 0): void {
     // A rising marimba run in the island's key, longer for bigger grabs, plus a sparkle on top.
+    // Grabs in quick succession climb higher each time (a combo you can hear).
     const notes = Math.min(7, 2 + Math.floor(size / 10));
     const scale = this.style.minor ? MINOR : MAJOR;
+    const lift = Math.min(4, chain) * 2;
+    if (chain > 0) this.tone(400, 0.25, { type: 'sine', vol: 0.12, slide: 3 + chain, wet: 0.2 });
     for (let i = 0; i < notes; i++) {
-      const deg = [0, 2, 4, 7, 9, 11, 14][i];
+      const deg = [0, 2, 4, 7, 9, 11, 14][i] + lift;
       const n = this.style.root + 12 + scale[deg % 7] + 12 * Math.floor(deg / 7);
       this.bell(midi(n), 0.35, { vol: 0.16, delay: i * 0.055, ratio: 4, index: 0.9, pan: (i / notes - 0.5) * 0.6 });
     }
@@ -388,7 +391,25 @@ export class Sound {
     this.tone(260, 0.35, { type: 'sine', vol: 0.28, slide: 3.2, wet: 0.2 });
     this.noise(0.12, 0.1, 2400, { sweep: 0.3 });
   }
+  /** Coin pickup / payout "ka-ching". */
+  coin(): void {
+    this.bell(midi(95), 0.12, { vol: 0.14, ratio: 2.01, index: 0.6 });
+    this.bell(midi(100), 0.5, { vol: 0.16, ratio: 2.01, index: 0.6, delay: 0.07, wet: 0.4 });
+  }
+  /** Tiny tick while coins count up. */
+  coinTick(): void {
+    this.bell(midi(91 + Math.floor(Math.random() * 3)), 0.06, { vol: 0.06, ratio: 2.01, index: 0.4, wet: 0 });
+  }
+  /** Star k (0..2) popping in: each one higher and brighter. */
+  star(k: number): void {
+    const r = this.style.root + 24;
+    this.bell(midi(r + [0, 4, 7][k]), 0.6, { vol: 0.18, ratio: 3, index: 1.2, wet: 0.5 });
+    this.bell(midi(r + 12 + [0, 4, 7][k]), 0.4, { vol: 0.08, ratio: 5, index: 0.8, delay: 0.05, wet: 0.5 });
+    this.noise(0.3, 0.04, 7000, { type: 'highpass', wet: 0.5 });
+  }
+
   bigCapture(): void {
+    this.duck(1.2);
     const r = this.style.root;
     [0, 4, 7, 12, 16].forEach((d, i) => this.bell(midi(r + 12 + d), 0.6, { vol: 0.15, delay: i * 0.07, ratio: 3, pan: (i - 2) * 0.2 }));
     this.noise(0.9, 0.05, 7000, { type: 'highpass', delay: 0.25, wet: 0.6 }); // shimmer
@@ -410,6 +431,7 @@ export class Sound {
     }
   }
   win(): void {
+    this.duck(3);
     const r = this.style.root;
     // fanfare: chord stab, rising arpeggio, final big chord with shimmer
     [0, 4, 7].forEach((d) => this.tone(midi(r + d), 0.3, { type: 'sawtooth', vol: 0.06, cutoff: 2600, sweep: 0.5, detune: 9 }));
@@ -418,6 +440,7 @@ export class Sound {
     this.noise(1.2, 0.05, 8000, { type: 'highpass', delay: 0.8, wet: 0.6 });
   }
   lose(): void {
+    this.duck(2.5);
     // sad trombone-ish "wah wah wah wahhh"
     [67, 66, 65, 64].forEach((n, i) =>
       this.tone(midi(n - 12), i === 3 ? 0.9 : 0.3, { type: 'sawtooth', vol: 0.07, cutoff: 900, sweep: 0.6, delay: i * 0.32, vib: i === 3 ? 0.02 : 0, vibRate: 6, wet: 0.2 }),
@@ -437,6 +460,23 @@ export class Sound {
       this.buildMelody();
       this.step = 0;
     }
+  }
+
+  /** Dip the music so a big moment stands out, then bring it back. */
+  private duck(seconds: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.musicGain || !this.musicOn) return;
+    const g = this.musicGain.gain;
+    const t = ctx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(0.05, t, 0.05);
+    g.setTargetAtTime(0.2, t + seconds, 0.6);
+  }
+
+  private leading = false;
+  /** While you're in 1st place, a sparkly extra layer joins the music. */
+  setLeading(v: boolean): void {
+    this.leading = v;
   }
 
   /** Speed up a little for the last seconds of a match. */
@@ -509,6 +549,12 @@ export class Sound {
         const fifth = scale[(chordDeg + 4) % 7] + (chordDeg + 4 >= 7 ? 12 : 0);
         for (const d of [0, third - scale[chordDeg % 7], fifth - scale[chordDeg % 7]])
           this.tone(midi(chordRoot + 12 + d), stepDur * 8, { type: 'sawtooth', vol: 0.05, attack: 0.15, cutoff: 1100, detune: 8, delay, dest });
+      }
+      // leader layer: a sparkly arpeggio on chord tones
+      if (this.leading && !this.calm) {
+        const arp = [0, 2, 4, 2][i % 4];
+        const deg = chordDeg + arp;
+        this.bell(midi(st.root + 24 + scale[deg % 7] + 12 * Math.floor(deg / 7)), 0.2, { vol: 0.08, ratio: 4, index: 0.6, delay, dest, wet: 0 });
       }
       // light drums during matches
       if (!this.calm) {

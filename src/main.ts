@@ -19,6 +19,7 @@ import { loadArt } from './render/Scenery';
 import { World } from './render/World';
 import { Hud } from './ui/Hud';
 import { Store } from './ui/Store';
+import { rewardFor, skinPrice } from './ui/Rewards';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -33,10 +34,15 @@ const input = new Input($('scene'), $('dpad'), $('joy'), $('throwBtn'));
 let game: Game;
 let director: Director | null = null;
 let combo = { lastCapture: -99, bonkedBy: -1, bonkedAt: -99, cuts: 0 };
+let captureChain = 0; // grabs in quick succession raise the pitch
 let heartbeatTimer = 0;
 let replayLeft = -1;
 let smoothDt = 1 / 60;
 let humanOut = false;
+/** What happened to you this match (for the results screen). */
+let log = { heartsLost: 0, bonked: 0, stolen: false, outlasted: 0 };
+/** Give the next match a head start (after a loss on the same island). */
+let retryBoost = false;
 let nextIsland = false; // the results screen leads on to the world map // your nest fell: you watch the rest of the match
 let phase: Phase = 'menu';
 let human: number | null = null;
@@ -78,24 +84,42 @@ function beatenCount(): number {
 /** The equipped skin, if it's unlocked (otherwise the classic look). */
 function equippedSkin(): number {
   const k = store.settings.skin;
-  return SKINS[k] && SKINS[k].unlockAt <= beatenCount() ? k : 0;
+  return SKINS[k] && skinOwned(k) ? k : 0;
+}
+
+function skinOwned(k: number): boolean {
+  return SKINS[k].unlockAt <= beatenCount() || store.stats.owned.includes(k);
+}
+
+function updateCoins(): void {
+  $('coinPill').textContent = String(store.stats.coins);
 }
 
 function buildSkinPicker(): void {
   const wrap = $('skins');
   wrap.innerHTML = '';
-  const have = beatenCount();
   SKINS.forEach((sk, k) => {
     const b = document.createElement('button');
-    const locked = sk.unlockAt > have;
+    const locked = !skinOwned(k);
+    const price = skinPrice(k);
     b.className = 'skin-card' + (k === equippedSkin() ? ' selected' : '') + (locked ? ' locked' : '');
     const swatch = [sk.body ?? '#ffffff', sk.deck, ...(sk.trailColors.length ? [sk.trailColors[0]] : [sk.tips])];
-    b.innerHTML = `<span class="sw">${swatch.map((c) => `<i style="background:${c}"></i>`).join('')}</span><b>${sk.name}</b><small>${locked ? `Win island ${sk.unlockAt}` : k === equippedSkin() ? 'Equipped' : 'Tap to wear'}</small>`;
+    b.innerHTML = `<span class="sw">${swatch.map((c) => `<i style="background:${c}"></i>`).join('')}</span><b>${sk.name}</b><small>${locked ? `Island ${sk.unlockAt} or <span class="coin-ico"></span>${price}` : k === equippedSkin() ? 'Equipped' : 'Tap to wear'}</small>`;
     b.onclick = () => {
       sound.unlock();
       if (locked) {
-        sound.empty();
-        return;
+        // Buy it early with coins.
+        if (store.stats.coins < price) {
+          sound.empty();
+          b.classList.remove('shake');
+          void b.offsetWidth;
+          b.classList.add('shake');
+          return;
+        }
+        store.stats.coins -= price;
+        store.stats.owned.push(k);
+        sound.coin();
+        updateCoins();
       }
       sound.click();
       store.settings.skin = k;
@@ -117,6 +141,9 @@ function showIslandCard(): void {
   $('islandName').textContent = m.name;
   $('islandName').style.color = m.theme.ui;
   $('islandBlurb').textContent = m.blurb;
+  const st = store.stats.stars[m.id] ?? 0;
+  $('islandStars').innerHTML = [0, 1, 2].map((k) => `<i class="star${k < st ? ' on' : ''}"></i>`).join('');
+  updateCoins();
 }
 
 function openWorldMap(): void {
@@ -277,6 +304,8 @@ function newGame(humanSlot: number | null, tutorial = false): void {
     if (humanSlot !== null) director = new Director(game, bots, humanSlot, pickMood(store.stats.recent));
   }
   combo = { lastCapture: -99, bonkedBy: -1, bonkedAt: -99, cuts: 0 };
+  log = { heartsLost: 0, bonked: 0, stolen: false, outlasted: 0 };
+  captureChain = 0;
   humanOut = false;
   hud.setSpectating(false);
   if (!tutorial) {
@@ -302,6 +331,7 @@ function startAttract(): void {
   againBtn.textContent = 'Play again';
   hud.show(false);
   sound.setMusicStyle(levelIndex(), true);
+  sound.setLeading(false);
   sound.startMusic();
   openWorldMap();
   applySettings();
@@ -316,6 +346,15 @@ function startMatch(): void {
   newGame(store.settings.slot);
   world.showAtlas = false;
   world.startSwoop();
+  if (retryBoost && human !== null) {
+    // Second try on the same island: a head start, and we say so.
+    const me = game.players[human];
+    me.balls = Math.max(me.balls, 3);
+    me.shield = true;
+    me.power = 'shield';
+    me.powerTimer = 10;
+    window.setTimeout(() => hud.toast('Retry boost: 3 balls + bubble shield!', true), 3300);
+  }
   showScreen(null);
   hud.show(true);
   phase = 'countdown';
@@ -445,7 +484,8 @@ function handleEvents(events: GameEvent[]): void {
       case 'capture':
         if (e.pid === me) {
           const pct = (e.cells.length / game.totalCells) * 100;
-          sound.capture(e.cells.length / (UNIT * UNIT));
+          captureChain = game.time - combo.lastCapture < 6 ? captureChain + 1 : 0;
+          sound.capture(e.cells.length / (UNIT * UNIT), captureChain);
           sound.thump(Math.min(1, pct / 6));
           world.kickCamera(Math.min(1, 0.25 + pct / 6));
           vibrate(pct >= 3 ? 60 : 20);
@@ -456,6 +496,7 @@ function handleEvents(events: GameEvent[]): void {
         break;
       case 'bonk':
         if (e.victim === me) {
+          log.bonked++;
           sound.bonk();
           vibrate(120);
           hud.toast(e.by === me ? 'Oops! Bonked by your own trail' : e.by === e.victim ? 'Swallowed by the clouds!' : `${nameOf(e.by)} cut your trail!`);
@@ -481,6 +522,7 @@ function handleEvents(events: GameEvent[]): void {
         break;
       case 'coreHit':
         if (e.owner === me) {
+          log.heartsLost++;
           sound.heartLost();
           vibrate(60);
           hud.toast(`${nameOf(e.by)} is attacking your egg!`);
@@ -492,6 +534,7 @@ function handleEvents(events: GameEvent[]): void {
       case 'coreStolen':
         sound.steal();
         if (e.owner === me) {
+          log.stolen = true;
           vibrate(200);
           hud.toast(`${nameOf(e.by)} stole your egg! Bump them!`, true);
         } else if (e.by === me) {
@@ -507,6 +550,7 @@ function handleEvents(events: GameEvent[]): void {
         break;
       case 'coreCaptured':
         sound.bigCapture();
+        if (e.owner !== me && !humanOut) log.outlasted++;
         if (e.by === me) {
           store.stats.eggsCaptured++;
           hud.combo('Nest captured!', PLAYER_COLORS[me!]);
@@ -597,26 +641,52 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   if (human !== null) st.bestLandPct = Math.max(st.bestLandPct, Math.round(peakPct(human)));
   store.save();
 
-  // results card
-  $('resultTitle').textContent = won ? 'You win!' : winner >= 0 ? `${game.players[winner].name} wins!` : 'Game over';
-  $('resultReason').textContent =
-    reason === 'captured' ? 'Your nest was captured' : reason === 'last' ? 'Last nest standing' : 'Most land when time ran out';
-  if (unlockedNew) $('resultReason').textContent += ` · ${LEVEL_MAPS[lvl + 1].name} unlocked!`;
-  const skinsNow = beatenCount();
-  if (skinsNow > skinsBefore && SKINS[skinsNow]) {
-    // New skin: wear it straight away (it can be changed under Style).
-    store.settings.skin = skinsNow;
-    store.save();
-    $('resultReason').textContent += ` New skin: ${SKINS[skinsNow].name}!`;
-    window.setTimeout(() => hud.toast(`New skin: ${SKINS[skinsNow].name}!`, true), 1600);
-  }
+  // ---------- results card: celebrate a win, frame a loss as "so close", always pay out ----------
+  const me = human;
+  const card = $('results').querySelector('.card')!;
+  card.classList.toggle('won', won);
+  card.classList.toggle('lost', !won);
   const order = game.ranking();
-  const big = $('resultBig');
-  if (human !== null) {
-    big.style.setProperty('--c', PLAYER_COLORS[human]);
-    // Count the score up for a little drama.
-    const rank = order.indexOf(human) + 1;
-    const target = game.percent(human);
+  let reward = null as ReturnType<typeof rewardFor> | null;
+  if (me !== null) {
+    const rivals = game.players.filter((p) => p.id !== me);
+    const rival = rivals.reduce((a, b) => (game.percent(b.id) > game.percent(a.id) ? b : a));
+    const rank = humanOut ? 4 - log.outlasted : order.indexOf(me) + 1;
+    const today = new Date().toISOString().slice(0, 10);
+    reward = rewardFor({
+      won,
+      rank,
+      peakPct: peakPct(me),
+      finalPct: game.percent(me),
+      rivalPct: game.percent(rival.id),
+      rivalName: rival.name,
+      captured: humanOut,
+      outlasted: log.outlasted,
+      heartsLost: log.heartsLost,
+      bonked: log.bonked,
+      eggStolen: log.stolen,
+      throws: game.players[me].stats.throws,
+      eggsTaken: game.players[me].stats.captures,
+      trailsCut: game.players[me].stats.bonks,
+      firstWinToday: won && st.lastWinDay !== today,
+    });
+    if (won) st.lastWinDay = today;
+    st.coins += reward.coins;
+    if (lvl >= 0) st.stars[game.map.id] = Math.max(st.stars[game.map.id] ?? 0, reward.stars);
+    // A loss on this island earns a head start on the next try here.
+    retryBoost = !won && lvl >= 0;
+    store.save();
+
+    $('resultTitle').textContent = reward.title;
+    $('resultReason').textContent = reward.note;
+    $('resultTip').textContent = reward.tip;
+    // Stars pop in one by one (empty outlines on a loss).
+    $('resultStars').innerHTML = [0, 1, 2].map((k) => `<i class="star${k < reward!.stars ? ' on' : ''}" style="animation-delay:${0.5 + k * 0.35}s"></i>`).join('');
+    for (let k = 0; k < reward.stars; k++) window.setTimeout(() => sound.star(k), 2400 + 500 + k * 350);
+
+    const big = $('resultBig');
+    big.style.setProperty('--c', PLAYER_COLORS[me]);
+    const target = game.percent(me);
     const start = performance.now();
     const tick = () => {
       const t = Math.min(1, (performance.now() - start) / 900);
@@ -625,13 +695,49 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
       if (t < 1 && phase === 'over') requestAnimationFrame(tick);
     };
     tick();
-    $('results').querySelector('.card')!.classList.toggle('won', won);
-  } else big.textContent = '';
+
+    // Coins count up with a tick per step, then a ka-ching.
+    const coinsEl = $('resultCoins');
+    coinsEl.innerHTML = `<span class="coin-ico"></span><b>+0</b><small>${reward.breakdown.join(' · ')}</small>`;
+    const total = reward.coins;
+    const cb = coinsEl.querySelector('b')!;
+    window.setTimeout(() => {
+      const t0 = performance.now();
+      let shown = 0;
+      const step = () => {
+        const t = Math.min(1, (performance.now() - t0) / 1100);
+        const v = Math.round(total * t);
+        if (v !== shown && Math.floor(v / 5) !== Math.floor(shown / 5)) sound.coinTick();
+        shown = v;
+        cb.textContent = `+${v}`;
+        if (t < 1) requestAnimationFrame(step);
+        else sound.coin();
+      };
+      step();
+    }, 2400 + 1400);
+  }
+
+  // What's next: unlocks first, then the nearest goal.
+  const lines: string[] = [];
+  if (unlockedNew) lines.push(`${LEVEL_MAPS[lvl + 1].name} unlocked!`);
+  const skinsNow = beatenCount();
+  if (skinsNow > skinsBefore && SKINS[skinsNow]) {
+    // New skin: wear it straight away (it can be changed under Style).
+    store.settings.skin = skinsNow;
+    store.save();
+    lines.push(`New skin: ${SKINS[skinsNow].name}!`);
+    window.setTimeout(() => hud.toast(`New skin: ${SKINS[skinsNow].name}!`, true), 1600);
+  } else {
+    const next = SKINS.findIndex((_, k) => k > 0 && !skinOwned(k));
+    if (next > 0) lines.push(`${SKINS[next].name} skin: ${Math.min(st.coins, skinPrice(next))}/${skinPrice(next)} coins`);
+  }
+  if (!won && retryBoost) lines.push('Retry boost ready: 3 balls + bubble shield');
+  $('resultNext').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+
   const places = ['1st', '2nd', '3rd', '4th'];
-  // When you lose, skip the ranking list: just your result and stats.
+  // When you lose, skip the ranking list: just your result and what's next.
   $('ranking').classList.toggle('hidden', !won);
-  $('ranking').innerHTML = game
-    .ranking()
+  $('ranking').innerHTML = order
     .map((id, k) => {
       const c = game.cores[id];
       const pct = game.percent(id);
@@ -643,13 +749,8 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
         <span class="tag">${tag}</span></div>`;
     })
     .join('');
-  if (human !== null) {
-    const s = game.players[human].stats;
-    $('myStats').innerHTML = `
-      <div><b>${peakPct(human).toFixed(1)}%</b>peak land</div>
-      <div><b>${s.bonks}</b>trails cut</div>
-      <div><b>${s.captures}</b>nests taken</div>`;
-  }
+  $('myStats').innerHTML = '';
+  void reason;
 }
 
 // ---------- wiring ----------
@@ -849,6 +950,7 @@ function loop(now: number): void {
   if (phase === 'playing') {
     director?.update(dt);
     sound.setHurry(CONFIG.matchSeconds - game.time < 30);
+    sound.setLeading(human !== null && !humanOut && game.time > 5 && game.leader() === human);
     tutorialTick(dt);
     // Heartbeat when your trail is in danger.
     heartbeatTimer -= dt;
@@ -920,6 +1022,11 @@ if (location.search.includes('debug')) {
       return phase;
     },
     world,
+    end(win: boolean) {
+      if (human === null) return;
+      game.over = true;
+      onGameOver(win ? human : (human + 1) % 4, 'time');
+    },
     travel(from: number, to: number) {
       pendingTravel = { from, to };
       startAttract();
