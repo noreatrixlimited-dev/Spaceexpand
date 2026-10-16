@@ -293,10 +293,14 @@ export class Sound {
    * with a tiny pop click. `size` 0..1 (bigger = lower), `vol` 0..1.
    */
   bubble(size = 0.5, vol = 0.5, delay = 0): void {
-    const f = 380 + (1 - size) * 900 + Math.random() * 160;
-    const d = 0.05 + size * 0.07;
-    this.tone(f, d, { type: 'sine', vol: 0.16 * vol, slide: 2.2 + Math.random() * 0.8, delay, attack: 0.003, pan: (Math.random() - 0.5) * 0.5, wet: 0.15 });
-    this.noise(0.012, 0.03 * vol, 6000, { type: 'highpass', delay: delay + d * 0.85 });
+    // Tuned to the island's key (pentatonic), so streams of bubbles sound like a little melody.
+    const steps = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21];
+    const k = Math.min(steps.length - 1, Math.floor((1 - size) * steps.length * 0.8 + Math.random() * 3));
+    const f = midi(this.style.root + 12 + steps[k]);
+    const d = 0.07 + size * 0.08;
+    this.tone(f, d, { type: 'sine', vol: 0.14 * vol, slide: 1.5, delay, attack: 0.004, pan: (Math.random() - 0.5) * 0.6, wet: 0.35 });
+    // a soft glassy ring on top
+    this.bell(f * 2, 0.25, { vol: 0.035 * vol, ratio: 2.01, index: 0.3, delay: delay + 0.01, wet: 0.5 });
   }
 
   /** A little cluster of bubbles (captures, splats, joining in). */
@@ -356,7 +360,7 @@ export class Sound {
       const now = ctx.currentTime;
       if (now >= this.bloopAt) {
         this.bubble(0.25 + Math.random() * 0.6, 0.35 + speed * 0.25 + carve * 0.2);
-        this.bloopAt = now + (0.16 + Math.random() * 0.22) / (0.6 + speed * 0.4 + carve * 0.9);
+        this.bloopAt = now + (0.2 + Math.random() * 0.25) / (0.6 + speed * 0.3 + carve * 0.7);
       }
     }
     if (!this.ride) {
@@ -388,13 +392,15 @@ export class Sound {
   }
 
   /** Deep thump for land grabs; bigger grabs thump harder. */
+  /** Land grab: a warm, soft swell (no thump), bigger for bigger grabs. */
   thump(power: number): void {
-    this.tone(110, 0.3, { type: 'sine', vol: 0.3 + power * 0.25, slide: 0.4 });
-    this.noise(0.09, 0.05 + power * 0.08, 500, { sweep: 0.4 });
+    this.tone(midi(this.style.root - 12), 0.6, { type: 'sine', vol: 0.12 + power * 0.12, attack: 0.03, wet: 0.3 });
   }
+  /** Trail in danger: a gentle, shimmering warning chime instead of a heartbeat. */
   heartbeat(intensity: number): void {
-    this.tone(62, 0.14, { type: 'sine', vol: 0.2 + intensity * 0.2, slide: 0.7 });
-    this.tone(56, 0.14, { type: 'sine', vol: 0.14 + intensity * 0.15, slide: 0.7, delay: 0.17 });
+    const r = this.style.root + 24;
+    this.bell(midi(r + 7), 0.5, { vol: 0.05 + intensity * 0.05, ratio: 3.01, index: 0.5, wet: 0.5 });
+    this.bell(midi(r + 6), 0.5, { vol: 0.04 + intensity * 0.04, ratio: 3.01, index: 0.5, delay: 0.16, wet: 0.5 });
   }
 
   whoosh(): void {
@@ -557,7 +563,8 @@ export class Sound {
     const ctx = this.ctx;
     if (!ctx || !this.musicGain) return;
     const st = this.style;
-    const bpm = st.bpm * (this.calm ? 0.85 : 1) * (this.hurry ? 1.15 : 1);
+    // Calm and dreamy: slower, no drums; a little livelier in the last half minute.
+    const bpm = st.bpm * 0.78 * (this.calm ? 0.9 : 1) * (this.hurry ? 1.1 : 1);
     const stepDur = 60 / bpm / 2; // eighth notes
     const dest = this.musicGain;
     const scale = st.minor ? MINOR : MAJOR;
@@ -568,38 +575,34 @@ export class Sound {
       const chordDeg = prog[Math.floor(i / 8) % 4];
       const chordRoot = st.root - 12 + scale[chordDeg % 7];
 
-      // lead
+      // lead: a soft music box
       const n = this.melody[i];
       if (n > 0) {
-        if (st.lead === 'bell') this.bell(midi(n + 12), 0.45, { vol: 0.32, delay, ratio: 3.5, index: 1.1, dest, wet: 0 });
-        else if (st.lead === 'pluck') this.tone(midi(n + 12), 0.3, { type: 'triangle', vol: 0.34, cutoff: 3500, sweep: 0.25, delay, dest });
-        else this.tone(midi(n + 12), 0.38, { type: 'sine', vol: 0.36, attack: 0.03, vib: 0.006, vibRate: 5, delay, dest });
+        this.bell(midi(n + 12), 0.9, { vol: 0.22, delay, ratio: 3.01, index: 0.7, dest, wet: 0 });
+        if (st.lead === 'flute') this.tone(midi(n + 12), 0.5, { type: 'sine', vol: 0.1, attack: 0.06, vib: 0.005, vibRate: 5, delay, dest });
       }
-      // bass on beats, a bouncy octave on the "and" of 2 and 4
-      if (i % 4 === 0) this.tone(midi(chordRoot - 12), 0.4, { type: 'triangle', vol: 0.5, cutoff: 700, delay, dest });
-      else if (!this.calm && i % 4 === 3) this.tone(midi(chordRoot), 0.15, { type: 'triangle', vol: 0.22, cutoff: 900, delay, dest });
-      // soft chord pad at the start of each bar
+      // gentle sustained bass, once per bar
+      if (i % 8 === 0) this.tone(midi(chordRoot - 12), stepDur * 8, { type: 'sine', vol: 0.32, attack: 0.12, delay, dest });
+      // warm pad
       if (i % 8 === 0) {
         const third = scale[(chordDeg + 2) % 7] + (chordDeg + 2 >= 7 ? 12 : 0);
         const fifth = scale[(chordDeg + 4) % 7] + (chordDeg + 4 >= 7 ? 12 : 0);
         for (const d of [0, third - scale[chordDeg % 7], fifth - scale[chordDeg % 7]])
-          this.tone(midi(chordRoot + 12 + d), stepDur * 8, { type: 'sawtooth', vol: 0.05, attack: 0.15, cutoff: 1100, detune: 8, delay, dest });
+          this.tone(midi(chordRoot + 12 + d), stepDur * 8.5, { type: 'triangle', vol: 0.07, attack: 0.5, cutoff: 1400, detune: 6, delay, dest });
       }
-      // leader layer: a sparkly arpeggio on chord tones
-      if (this.leading && !this.calm) {
-        const arp = [0, 2, 4, 2][i % 4];
-        const deg = chordDeg + arp;
-        this.bell(midi(st.root + 24 + scale[deg % 7] + 12 * Math.floor(deg / 7)), 0.2, { vol: 0.08, ratio: 4, index: 0.6, delay, dest, wet: 0 });
+      // water ripples: a slow rising arpeggio every other bar
+      if (i % 16 >= 12 && i % 2 === 0) {
+        const deg = chordDeg + [0, 2, 4, 7][(i % 16 - 12) / 2];
+        this.bell(midi(st.root + 24 + scale[deg % 7] + 12 * Math.floor(deg / 7)), 0.6, { vol: 0.06, ratio: 2.01, index: 0.4, delay, dest, wet: 0 });
       }
-      // tension: a pulsing low octave while your trail is in danger
-      if (this.tension > 0.5 && !this.calm) {
-        this.tone(midi(chordRoot - 12 + (i % 2 ? 12 : 0)), stepDur * 0.9, { type: 'sawtooth', vol: 0.06 + this.tension * 0.08, cutoff: 500 + this.tension * 900, delay, dest });
+      // leader layer: sparkles while you're in 1st place
+      if (this.leading && !this.calm && i % 2 === 1) {
+        const deg = chordDeg + [0, 2, 4, 2][Math.floor(i / 2) % 4];
+        this.bell(midi(st.root + 36 + scale[deg % 7] + 12 * Math.floor(deg / 7)), 0.35, { vol: 0.04, ratio: 4, index: 0.4, delay, dest, wet: 0 });
       }
-      // light drums during matches
-      if (!this.calm) {
-        if (i % 4 === 0) this.tone(120, 0.18, { type: 'sine', vol: 0.45, slide: 0.35, delay, dest }); // kick
-        if (i % 8 === 4) this.noise(0.12, 0.16, 1800, { type: 'bandpass', q: 0.8, delay, dest }); // snare-ish clap
-        if (i % 2 === 1 || this.hurry) this.noise(0.035, i % 2 ? 0.07 : 0.04, 8000, { type: 'highpass', delay, dest }); // hat
+      // danger: the pad swells a little higher (no pulse)
+      if (this.tension > 0.5 && !this.calm && i % 8 === 4) {
+        this.tone(midi(chordRoot + 24 + scale[(chordDeg + 4) % 7] - scale[chordDeg % 7]), stepDur * 4, { type: 'sine', vol: 0.04 + this.tension * 0.04, attack: 0.3, vib: 0.01, vibRate: 6, delay, dest });
       }
       this.nextNoteTime += stepDur;
       this.step++;

@@ -1098,7 +1098,7 @@ function loop(now: number): void {
     heartbeatTimer -= dt;
     if (world.danger > 0.55 && heartbeatTimer <= 0) {
       sound.heartbeat(world.danger);
-      heartbeatTimer = 0.95 - world.danger * 0.45;
+      heartbeatTimer = 1.8 - world.danger * 0.6;
     }
   }
   if (phase === 'playing' || phase === 'over') {
