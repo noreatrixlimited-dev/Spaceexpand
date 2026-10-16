@@ -170,7 +170,7 @@ export class Sound {
       const osc = ctx.createOscillator();
       osc.type = o.type ?? 'sine';
       osc.frequency.setValueAtTime(freq, t);
-      if (o.slide) osc.frequency.exponentialRampToValueAtTime(Math.max(30, freq * o.slide), t + dur);
+      if (o.slide) osc.frequency.exponentialRampToValueAtTime(Math.min(16000, Math.max(30, freq * o.slide)), t + dur);
       if (k === 1) osc.detune.value = o.detune!;
       if (o.vib) {
         const lfo = ctx.createOscillator();
@@ -284,8 +284,24 @@ export class Sound {
   // ---------- effects ----------
 
   click(): void {
-    this.tone(1100, 0.06, { type: 'sine', vol: 0.16, slide: 0.55 });
-    this.noise(0.02, 0.05, 5000, { type: 'highpass' });
+    // a bubble pop for every button
+    this.bubble(1, 0.9);
+  }
+
+  /**
+   * One bubble "bloop": a sine whose pitch shoots up as it closes (how real bubbles sound),
+   * with a tiny pop click. `size` 0..1 (bigger = lower), `vol` 0..1.
+   */
+  bubble(size = 0.5, vol = 0.5, delay = 0): void {
+    const f = 380 + (1 - size) * 900 + Math.random() * 160;
+    const d = 0.05 + size * 0.07;
+    this.tone(f, d, { type: 'sine', vol: 0.16 * vol, slide: 2.2 + Math.random() * 0.8, delay, attack: 0.003, pan: (Math.random() - 0.5) * 0.5, wet: 0.15 });
+    this.noise(0.012, 0.03 * vol, 6000, { type: 'highpass', delay: delay + d * 0.85 });
+  }
+
+  /** A little cluster of bubbles (captures, splats, joining in). */
+  bubbles(count: number, vol = 0.6): void {
+    for (let i = 0; i < count; i++) this.bubble(Math.random(), vol * (0.6 + Math.random() * 0.4), i * (0.03 + Math.random() * 0.05));
   }
   trail(): void {
     const now = performance.now();
@@ -299,16 +315,19 @@ export class Sound {
     const notes = Math.min(7, 2 + Math.floor(size / 10));
     const scale = this.style.minor ? MINOR : MAJOR;
     const lift = Math.min(4, chain) * 2;
-    if (chain > 0) this.tone(400, 0.25, { type: 'sine', vol: 0.12, slide: 3 + chain, wet: 0.2 });
+    if (chain > 0) this.tone(400, 0.25, { type: 'sine', vol: 0.12, slide: 3 + Math.min(4, chain), wet: 0.2 });
     for (let i = 0; i < notes; i++) {
       const deg = [0, 2, 4, 7, 9, 11, 14][i] + lift;
       const n = this.style.root + 12 + scale[deg % 7] + 12 * Math.floor(deg / 7);
       this.bell(midi(n), 0.35, { vol: 0.16, delay: i * 0.055, ratio: 4, index: 0.9, pan: (i / notes - 0.5) * 0.6 });
     }
     this.bell(midi(this.style.root + 36), 0.6, { vol: 0.06, delay: notes * 0.055, ratio: 7.1, index: 0.6, wet: 0.6 });
+    this.bubbles(Math.min(8, 3 + Math.floor(size / 15)), 0.7);
   }
   bonk(): void {
-    // cartoon "boing" with a thud
+    // a big bubble pop, then a cartoon "boing"
+    this.tone(180, 0.08, { type: 'sine', vol: 0.35, slide: 4, attack: 0.002 });
+    this.noise(0.05, 0.25, 4000, { type: 'bandpass', q: 1.5 });
     this.tone(330, 0.5, { type: 'sine', vol: 0.28, slide: 0.45, vib: 0.08, vibRate: 18, wet: 0.15 });
     this.tone(660, 0.18, { type: 'triangle', vol: 0.08, slide: 0.4 });
     this.noise(0.12, 0.2, 700, { sweep: 0.3 });
@@ -327,10 +346,19 @@ export class Sound {
   }
   private ride: { src: AudioBufferSourceNode; filter: BiquadFilterNode; gain: GainNode } | null = null;
 
-  /** Continuous board sound: a soft snowy hiss that swells when carving. */
+  private bloopAt = 0;
+
+  /** Moving sound: a soft watery swish plus a stream of little bubble bloops (faster when turning). */
   setRide(speed: number, carve: number): void {
     const ctx = this.ctx;
     if (!ctx || !this.sfxGain) return;
+    if (speed > 0.05) {
+      const now = ctx.currentTime;
+      if (now >= this.bloopAt) {
+        this.bubble(0.25 + Math.random() * 0.6, 0.35 + speed * 0.25 + carve * 0.2);
+        this.bloopAt = now + (0.16 + Math.random() * 0.22) / (0.6 + speed * 0.4 + carve * 0.9);
+      }
+    }
     if (!this.ride) {
       const len = ctx.sampleRate * 2;
       const buf = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -355,8 +383,8 @@ export class Sound {
       this.ride = { src, filter, gain };
     }
     const t = ctx.currentTime;
-    this.ride.gain.gain.setTargetAtTime(speed * (0.045 + carve * 0.15), t, 0.08);
-    this.ride.filter.frequency.setTargetAtTime(700 + carve * 1700 + speed * 300, t, 0.08);
+    this.ride.gain.gain.setTargetAtTime(speed * (0.02 + carve * 0.06), t, 0.08);
+    this.ride.filter.frequency.setTargetAtTime(500 + carve * 900 + speed * 200, t, 0.08);
   }
 
   /** Deep thump for land grabs; bigger grabs thump harder. */
@@ -375,6 +403,7 @@ export class Sound {
   }
   splat(mine: boolean): void {
     const v = mine ? 1 : 0.55;
+    this.bubbles(mine ? 4 : 2, v);
     this.noise(0.26, 0.26 * v, 3200, { sweep: 0.12, q: 3, wet: 0.15 });
     this.tone(220, 0.2, { type: 'sine', vol: 0.3 * v, slide: 0.35 });
     this.tone(900, 0.06, { type: 'sine', vol: 0.08 * v, slide: 0.5, delay: 0.02 });
