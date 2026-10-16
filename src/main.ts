@@ -130,7 +130,7 @@ function buildMissions(): void {
 /** The 7-day gift: once a day, shown when the world map opens. */
 function maybeShowGift(): void {
   const g = store.stats.gift;
-  if (g.last === today() || phase !== 'menu') return;
+  if (g.last === today() || phase !== 'menu' || !$('results').classList.contains('hidden')) return;
   const day = g.count % 7;
   const golden = day === 6 && !store.stats.owned.includes(GIFT_SKIN);
   $('giftDays').innerHTML = GIFT_COINS.map(
@@ -259,7 +259,7 @@ function openWorldMap(): void {
       sound.whoosh();
       atlas.travel(trip.from, trip.to, () => {
         window.setTimeout(maybeShowGift, 600);
-        sound.setMusicStyle(trip.to, true);
+        sound.setKey(trip.to);
         sound.heartGained();
         title.classList.remove('traveling');
         showIslandCard();
@@ -321,10 +321,9 @@ function setupMapTouch(): void {
       return;
     }
     $('title').classList.add('traveling');
-    sound.startMusic();
     sound.whoosh();
     atlas.travel(from, i, () => {
-      sound.setMusicStyle(musicIndex(), true);
+      sound.setKey(musicIndex());
       $('title').classList.remove('traveling');
       showIslandCard();
     });
@@ -362,7 +361,6 @@ function updateStatsLine(): void {
 function syncSettingsUI(): void {
   const s = store.settings;
   const map: Record<string, boolean> = {
-    music: s.music,
     sfx: s.sfx,
     vibrate: s.vibrate,
     dpad: s.controls === 'dpad',
@@ -376,7 +374,6 @@ function syncSettingsUI(): void {
 }
 
 function applySettings(): void {
-  sound.musicOn = store.settings.music;
   sound.sfxOn = store.settings.sfx;
   sound.applyVolumes();
   $('dpad').classList.toggle('hidden', store.settings.controls !== 'dpad' || phase === 'menu');
@@ -434,10 +431,7 @@ function startAttract(): void {
   replayLeft = -1;
   againBtn.textContent = 'Play again';
   hud.show(false);
-  sound.setMusicStyle(musicIndex(), true);
-  sound.setLeading(false);
-  sound.setTension(0);
-  sound.startMusic();
+  sound.setKey(musicIndex());
   openWorldMap();
   applySettings();
   updateStatsLine();
@@ -446,8 +440,7 @@ function startAttract(): void {
 
 function startMatch(): void {
   sound.unlock();
-  sound.setMusicStyle(musicIndex(), false);
-  sound.startMusic();
+  sound.setKey(musicIndex());
   newGame(store.settings.slot);
   world.showAtlas = false;
   world.startSwoop();
@@ -491,8 +484,7 @@ function setCoach(text: string, finger: 'drag' | 'tap' | 'none'): void {
 
 function startTutorial(): void {
   sound.unlock();
-  sound.setMusicStyle(musicIndex(), false);
-  sound.startMusic();
+  sound.setKey(musicIndex());
   newGame(store.settings.slot, true);
   world.showAtlas = false;
   showScreen(null);
@@ -663,11 +655,12 @@ function handleEvents(events: GameEvent[]): void {
         } else if (e.owner === me) {
           vibrate(300);
           hud.toast('Your nest was captured!', true);
-          // You're out, but the match goes on: watch it play out (or skip).
+          // You're out: the match ends for you and you go back to the menu.
           humanOut = true;
           input.enabled = false;
-          world.mode = 'overview';
-          hud.setSpectating(true);
+          window.setTimeout(() => {
+            if (phase === 'playing' && humanOut) onGameOver(game.leader(), 'captured');
+          }, 1200);
         }
         break;
       case 'voidRing':
@@ -719,6 +712,7 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   input.enabled = false;
   world.mode = 'overview';
   const won = winner === human;
+  matchWon = won;
   if (won) sound.win();
   else sound.lose();
   hud.toast(won ? 'You win!' : 'Match over', true);
@@ -812,7 +806,8 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
     $('resultTip').textContent = reward.tip;
     // Stars pop in one by one (empty outlines on a loss).
     $('resultStars').innerHTML = [0, 1, 2].map((k) => `<i class="star${k < reward!.stars ? ' on' : ''}" style="animation-delay:${0.5 + k * 0.35}s"></i>`).join('');
-    for (let k = 0; k < reward.stars; k++) window.setTimeout(() => sound.star(k), 2400 + 500 + k * 350);
+    const showAt = won ? 2400 : LOSS_TO_MENU * 1000;
+    for (let k = 0; k < reward.stars; k++) window.setTimeout(() => sound.star(k), showAt + 500 + k * 350);
 
     const big = $('resultBig');
     big.style.setProperty('--c', PLAYER_COLORS[me]);
@@ -844,7 +839,7 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
         else sound.coin();
       };
       step();
-    }, 2400 + 1400);
+    }, showAt + 900);
   }
 
   // What's next: unlocks first, then the nearest goal.
@@ -884,7 +879,26 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
     .join('');
   $('myStats').innerHTML = '';
   void reason;
+  if (!won) {
+    // A loss ends the match: back to the world map, with the results card on top of it.
+    window.setTimeout(() => {
+      if (phase !== 'over') return;
+      startAttract();
+      againBtn.textContent = 'Try again';
+      $('menuBtn').textContent = 'OK';
+      $('results').classList.remove('hidden');
+      $('title').classList.add('traveling'); // tuck the island card away under the results
+      lossCardLeft = 8;
+    }, LOSS_TO_MENU * 1000);
+  }
 }
+
+/** Seconds from losing to being back on the world map. */
+const LOSS_TO_MENU = 0.9;
+/** Seconds left before the loss card on the world map closes by itself. */
+let lossCardLeft = -1;
+/** Whether the match that just ended was won. */
+let matchWon = false;
 
 // ---------- wiring ----------
 
@@ -948,10 +962,6 @@ document.querySelectorAll<HTMLInputElement>('[data-s]').forEach((el) => {
   el.onchange = () => {
     const s = store.settings;
     switch (el.dataset.s) {
-      case 'music':
-        s.music = el.checked;
-        if (s.music) sound.startMusic();
-        break;
       case 'sfx':
         s.sfx = el.checked;
         break;
@@ -1010,12 +1020,14 @@ function countdownLabel(): string {
 }
 againBtn.onclick = () => {
   replayLeft = -1;
+  lossCardLeft = -1;
   sound.click();
   if (nextIsland) startAttract();
   else startMatch();
 };
 $('menuBtn').onclick = () => {
   replayLeft = -1;
+  lossCardLeft = -1;
   sound.click();
   startAttract();
 };
@@ -1097,9 +1109,6 @@ function loop(now: number): void {
 
   if (phase === 'playing') {
     director?.update(dt);
-    sound.setHurry(CONFIG.matchSeconds - game.time < 30);
-    sound.setLeading(human !== null && !humanOut && game.time > 5 && game.leader() === human);
-    sound.setTension(world.danger);
     tutorialTick(dt);
     // Heartbeat when your trail is in danger.
     heartbeatTimer -= dt;
@@ -1135,9 +1144,21 @@ function loop(now: number): void {
       startAttract();
     }
   }
+  if (lossCardLeft > 0 && phase === 'menu' && !$('results').classList.contains('hidden')) {
+    const before = Math.ceil(lossCardLeft);
+    lossCardLeft -= dt;
+    const n = Math.ceil(lossCardLeft);
+    if (n !== before) $('menuBtn').textContent = `OK (${Math.max(0, n)})`;
+    if (lossCardLeft <= 0) {
+      lossCardLeft = -1;
+      $('results').classList.add('hidden');
+      openWorldMap();
+    }
+  }
   if (phase === 'over') {
     overTimer -= dt;
-    if (overTimer <= 0 && $('results').classList.contains('hidden')) {
+    // Wins show the results here; a loss has already gone back to the menu.
+    if (matchWon && overTimer <= 0 && $('results').classList.contains('hidden')) {
       showScreen('results');
       hud.show(false);
       replayLeft = 5;
