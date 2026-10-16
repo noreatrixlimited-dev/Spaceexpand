@@ -58,15 +58,11 @@ export class Sound {
   private musicGain: GainNode | null = null;
   private reverb: ConvolverNode | null = null;
   private reverbIn: GainNode | null = null;
-  private noiseBuf: AudioBuffer | null = null;
   private musicTimer: number | null = null;
   private nextNoteTime = 0;
   private step = 0;
   private style: Style = STYLES[0];
-  private calm = true;
-  private hurry = false;
   private melody: number[] = [];
-  private lastTrail = 0;
   sfxOn = true;
   musicOn = true;
 
@@ -109,10 +105,6 @@ export class Sound {
       this.musicGain.connect(musicSend);
       musicSend.connect(this.reverbIn);
 
-      const len = ctx.sampleRate;
-      this.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
-      const d = this.noiseBuf.getChannelData(0);
-      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       this.buildMelody();
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
@@ -205,292 +197,144 @@ export class Sound {
     }
   }
 
-  /** FM bell / marimba: a sine carrier wobbled by a sine at a ratio, with a fast-fading index. */
-  private bell(freq: number, dur: number, o: { vol?: number; delay?: number; ratio?: number; index?: number; pan?: number; dest?: AudioNode; wet?: number } = {}): void {
-    const ctx = this.ctx;
-    if (!ctx || !this.sfxGain) return;
-    const t = ctx.currentTime + (o.delay ?? 0);
-    const car = ctx.createOscillator();
-    const mod = ctx.createOscillator();
-    const mg = ctx.createGain();
-    car.frequency.value = freq;
-    mod.frequency.value = freq * (o.ratio ?? 3.5);
-    const index = freq * (o.index ?? 1.4);
-    mg.gain.setValueAtTime(index, t);
-    mg.gain.exponentialRampToValueAtTime(Math.max(1, index * 0.05), t + dur * 0.6);
-    mod.connect(mg);
-    mg.connect(car.frequency);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(o.vol ?? 0.25, t + 0.004);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    car.connect(g);
-    let out: AudioNode = g;
-    if (o.pan) {
-      const p = ctx.createStereoPanner();
-      p.pan.value = o.pan;
-      g.connect(p);
-      out = p;
-    }
-    out.connect(o.dest ?? this.sfxGain);
-    if (this.reverbIn && (o.wet ?? 0.3) > 0) {
-      const s = ctx.createGain();
-      s.gain.value = o.wet ?? 0.3;
-      out.connect(s);
-      s.connect(this.reverbIn);
-    }
-    car.start(t);
-    mod.start(t);
-    car.stop(t + dur + 0.05);
-    mod.stop(t + dur + 0.05);
-  }
-
-  /** Filtered noise burst; `sweep` moves the filter over the sound (e.g. whooshes, splats). */
-  private noise(dur: number, vol = 0.2, freq = 1200, o: { type?: BiquadFilterType; sweep?: number; delay?: number; q?: number; pan?: number; dest?: AudioNode; wet?: number } = {}): void {
-    const ctx = this.ctx;
-    if (!ctx || !this.sfxGain || !this.noiseBuf) return;
-    const t = ctx.currentTime + (o.delay ?? 0);
-    const src = ctx.createBufferSource();
-    src.buffer = this.noiseBuf;
-    const f = ctx.createBiquadFilter();
-    f.type = o.type ?? 'lowpass';
-    f.Q.value = o.q ?? 0.8;
-    f.frequency.setValueAtTime(freq, t);
-    if (o.sweep) f.frequency.exponentialRampToValueAtTime(Math.max(40, freq * o.sweep), t + dur);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + 0.005);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(f);
-    f.connect(g);
-    let out: AudioNode = g;
-    if (o.pan) {
-      const p = ctx.createStereoPanner();
-      p.pan.value = o.pan;
-      g.connect(p);
-      out = p;
-    }
-    out.connect(o.dest ?? this.sfxGain);
-    if (o.wet && this.reverbIn) {
-      const s = ctx.createGain();
-      s.gain.value = o.wet;
-      out.connect(s);
-      s.connect(this.reverbIn);
-    }
-    src.start(t, Math.random() * 0.5);
-    src.stop(t + dur + 0.05);
-  }
-
-  // ---------- effects ----------
-
-  click(): void {
-    // a bubble pop for every button
-    this.bubble(1, 0.9);
-  }
+  // ---------- effects: everything is a bubble ----------
 
   /**
-   * One bubble "bloop": a sine whose pitch shoots up as it closes (how real bubbles sound),
-   * with a tiny pop click. `size` 0..1 (bigger = lower), `vol` 0..1.
+   * One bubble "bloop": a sine whose pitch rises as the bubble closes (how real bubbles sound).
+   * `step` picks the note in the island's pentatonic scale (higher = smaller bubble).
    */
-  bubble(size = 0.5, vol = 0.5, delay = 0): void {
-    // Tuned to the island's key (pentatonic), so streams of bubbles sound like a little melody.
-    const steps = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21];
-    const k = Math.min(steps.length - 1, Math.floor((1 - size) * steps.length * 0.8 + Math.random() * 3));
-    const f = midi(this.style.root + 12 + steps[k]);
-    const d = 0.07 + size * 0.08;
-    this.tone(f, d, { type: 'sine', vol: 0.14 * vol, slide: 1.5, delay, attack: 0.004, pan: (Math.random() - 0.5) * 0.6, wet: 0.35 });
-    // a soft glassy ring on top
-    this.bell(f * 2, 0.25, { vol: 0.035 * vol, ratio: 2.01, index: 0.3, delay: delay + 0.01, wet: 0.5 });
+  private bloop(step: number, vol = 0.5, delay = 0, len = 1): void {
+    const steps = [0, 2, 4, 7, 9];
+    const k = Math.max(-10, Math.min(19, Math.round(step)));
+    const oct = Math.floor(k / 5);
+    const n = this.style.root + 12 + steps[((k % 5) + 5) % 5] + oct * 12;
+    const d = (0.06 + Math.max(0, 10 - k) * 0.008) * len;
+    this.tone(midi(n), d, { type: 'sine', vol: 0.15 * vol, slide: 1.5, delay, attack: 0.004, pan: (Math.random() - 0.5) * 0.6, wet: 0.3 });
   }
 
-  /** A little cluster of bubbles (captures, splats, joining in). */
+  /** A run of bubbles: `from` to `to` scale steps, `gap` seconds apart. */
+  private run(from: number, to: number, gap: number, vol = 0.5, delay = 0): void {
+    const n = Math.abs(to - from);
+    for (let i = 0; i <= n; i++) this.bloop(from + Math.sign(to - from) * i, vol, delay + i * gap);
+  }
+
+  /** A random bubble (used while moving and for clicks). `size` 0..1, bigger = lower. */
+  bubble(size = 0.5, vol = 0.5, delay = 0): void {
+    this.bloop(Math.round((1 - size) * 9 + Math.random() * 2), vol, delay);
+  }
+
+  /** A little cluster of random bubbles. */
   bubbles(count: number, vol = 0.6): void {
     for (let i = 0; i < count; i++) this.bubble(Math.random(), vol * (0.6 + Math.random() * 0.4), i * (0.03 + Math.random() * 0.05));
   }
+
+  click(): void {
+    this.bloop(8, 0.8);
+  }
   trail(): void {
-    const now = performance.now();
-    if (now - this.lastTrail < 70) return;
-    this.lastTrail = now;
-    this.tone(1500 + Math.random() * 400, 0.04, { type: 'sine', vol: 0.035 });
+    // the moving bubble stream covers this
   }
   capture(size: number, chain = 0): void {
-    // A rising marimba run in the island's key, longer for bigger grabs, plus a sparkle on top.
-    // Grabs in quick succession climb higher each time (a combo you can hear).
-    const notes = Math.min(7, 2 + Math.floor(size / 10));
-    const scale = this.style.minor ? MINOR : MAJOR;
-    const lift = Math.min(4, chain) * 2;
-    if (chain > 0) this.tone(400, 0.25, { type: 'sine', vol: 0.12, slide: 3 + Math.min(4, chain), wet: 0.2 });
-    for (let i = 0; i < notes; i++) {
-      const deg = [0, 2, 4, 7, 9, 11, 14][i] + lift;
-      const n = this.style.root + 12 + scale[deg % 7] + 12 * Math.floor(deg / 7);
-      this.bell(midi(n), 0.35, { vol: 0.16, delay: i * 0.055, ratio: 4, index: 0.9, pan: (i / notes - 0.5) * 0.6 });
-    }
-    this.bell(midi(this.style.root + 36), 0.6, { vol: 0.06, delay: notes * 0.055, ratio: 7.1, index: 0.6, wet: 0.6 });
-    this.bubbles(Math.min(8, 3 + Math.floor(size / 15)), 0.7);
+    // a rising run of bubbles, longer for bigger grabs and higher for combos
+    const len = Math.min(7, 3 + Math.floor(size / 12));
+    const base = 2 + Math.min(4, chain) * 2;
+    this.run(base, base + len, 0.05, 0.8);
   }
   bonk(): void {
-    // a big bubble pop, then a cartoon "boing"
-    this.tone(180, 0.08, { type: 'sine', vol: 0.35, slide: 4, attack: 0.002 });
-    this.noise(0.05, 0.25, 4000, { type: 'bandpass', q: 1.5 });
-    this.tone(330, 0.5, { type: 'sine', vol: 0.28, slide: 0.45, vib: 0.08, vibRate: 18, wet: 0.15 });
-    this.tone(660, 0.18, { type: 'triangle', vol: 0.08, slide: 0.4 });
-    this.noise(0.12, 0.2, 700, { sweep: 0.3 });
+    // a big low bubble, then a few little ones scattering
+    this.bloop(-5, 1.1, 0, 2.5);
+    this.bubbles(4, 0.6);
   }
   squeak(): void {
-    this.tone(1300, 0.11, { type: 'sine', vol: 0.13, slide: 1.9, vib: 0.03, vibRate: 30 });
+    this.bloop(12, 0.7);
   }
   heartLost(): void {
-    // "uh-oh"
-    this.tone(622, 0.2, { type: 'triangle', vol: 0.2, cutoff: 2200, slide: 0.97 });
-    this.tone(466, 0.32, { type: 'triangle', vol: 0.2, cutoff: 1800, slide: 0.94, delay: 0.17, wet: 0.2 });
+    this.run(5, 1, 0.09, 0.8);
   }
   heartGained(): void {
-    this.bell(midi(79), 0.3, { vol: 0.15, ratio: 3 });
-    this.bell(midi(84), 0.45, { vol: 0.15, ratio: 3, delay: 0.09 });
+    this.run(5, 9, 0.07, 0.7);
   }
-  private ride: { src: AudioBufferSourceNode; filter: BiquadFilterNode; gain: GainNode } | null = null;
 
   private bloopAt = 0;
 
-  /** Moving sound: a soft watery swish plus a stream of little bubble bloops (faster when turning). */
+  /** Moving: a stream of little bubble bloops (faster when turning). */
   setRide(speed: number, carve: number): void {
     const ctx = this.ctx;
-    if (!ctx || !this.sfxGain) return;
-    if (speed > 0.05) {
-      const now = ctx.currentTime;
-      if (now >= this.bloopAt) {
-        this.bubble(0.25 + Math.random() * 0.6, 0.35 + speed * 0.25 + carve * 0.2);
-        this.bloopAt = now + (0.2 + Math.random() * 0.25) / (0.6 + speed * 0.3 + carve * 0.7);
-      }
+    if (!ctx || !this.sfxGain || speed <= 0.05) return;
+    const now = ctx.currentTime;
+    if (now >= this.bloopAt) {
+      this.bubble(0.25 + Math.random() * 0.6, 0.35 + speed * 0.25 + carve * 0.2);
+      this.bloopAt = now + (0.2 + Math.random() * 0.25) / (0.6 + speed * 0.3 + carve * 0.7);
     }
-    if (!this.ride) {
-      const len = ctx.sampleRate * 2;
-      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-      const d = buf.getChannelData(0);
-      let last = 0;
-      for (let i = 0; i < len; i++) {
-        last = last * 0.92 + (Math.random() * 2 - 1) * 0.08; // brown-ish noise
-        d[i] = last * 3;
-      }
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.loop = true;
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.Q.value = 0.7;
-      const gain = ctx.createGain();
-      gain.gain.value = 0;
-      src.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.sfxGain);
-      src.start();
-      this.ride = { src, filter, gain };
-    }
-    const t = ctx.currentTime;
-    this.ride.gain.gain.setTargetAtTime(speed * (0.02 + carve * 0.06), t, 0.08);
-    this.ride.filter.frequency.setTargetAtTime(500 + carve * 900 + speed * 200, t, 0.08);
   }
 
-  /** Deep thump for land grabs; bigger grabs thump harder. */
-  /** Land grab: a warm, soft swell (no thump), bigger for bigger grabs. */
   thump(power: number): void {
-    this.tone(midi(this.style.root - 12), 0.6, { type: 'sine', vol: 0.12 + power * 0.12, attack: 0.03, wet: 0.3 });
+    this.bloop(-3, 0.5 + power * 0.5, 0.02, 2);
   }
-  /** Trail in danger: a gentle, shimmering warning chime instead of a heartbeat. */
+  /** Trail in danger: two slow low bubbles. */
   heartbeat(intensity: number): void {
-    const r = this.style.root + 24;
-    this.bell(midi(r + 7), 0.5, { vol: 0.05 + intensity * 0.05, ratio: 3.01, index: 0.5, wet: 0.5 });
-    this.bell(midi(r + 6), 0.5, { vol: 0.04 + intensity * 0.04, ratio: 3.01, index: 0.5, delay: 0.16, wet: 0.5 });
+    this.bloop(-2, 0.4 + intensity * 0.3, 0, 2);
+    this.bloop(-3, 0.3 + intensity * 0.3, 0.18, 2);
   }
-
   whoosh(): void {
-    this.noise(0.24, 0.16, 600, { type: 'bandpass', sweep: 5, q: 1.4 });
-    this.tone(380, 0.16, { type: 'sine', vol: 0.08, slide: 2 });
+    this.run(3, 7, 0.025, 0.6);
   }
   splat(mine: boolean): void {
-    const v = mine ? 1 : 0.55;
-    this.bubbles(mine ? 4 : 2, v);
-    this.noise(0.26, 0.26 * v, 3200, { sweep: 0.12, q: 3, wet: 0.15 });
-    this.tone(220, 0.2, { type: 'sine', vol: 0.3 * v, slide: 0.35 });
-    this.tone(900, 0.06, { type: 'sine', vol: 0.08 * v, slide: 0.5, delay: 0.02 });
+    this.bubbles(mine ? 5 : 3, mine ? 0.8 : 0.45);
   }
   empty(): void {
-    this.tone(180, 0.09, { type: 'square', vol: 0.05, cutoff: 900 });
-    this.tone(150, 0.09, { type: 'square', vol: 0.05, cutoff: 900, delay: 0.08 });
+    this.bloop(-4, 0.4);
   }
   steal(): void {
-    // sneaky pizzicato steps down
-    [84, 80, 77, 72].forEach((n, i) => this.tone(midi(n), 0.14, { type: 'triangle', vol: 0.14, cutoff: 3000, sweep: 0.3, delay: i * 0.07 }));
+    this.run(9, 4, 0.07, 0.8);
   }
   drop(): void {
-    this.tone(260, 0.35, { type: 'sine', vol: 0.28, slide: 3.2, wet: 0.2 });
-    this.noise(0.12, 0.1, 2400, { sweep: 0.3 });
+    this.run(2, 8, 0.04, 0.7);
   }
-  /** Coin pickup / payout "ka-ching". */
   coin(): void {
-    this.bell(midi(95), 0.12, { vol: 0.14, ratio: 2.01, index: 0.6 });
-    this.bell(midi(100), 0.5, { vol: 0.16, ratio: 2.01, index: 0.6, delay: 0.07, wet: 0.4 });
+    this.bloop(12, 0.8);
+    this.bloop(14, 0.8, 0.07);
   }
-  /** Tiny tick while coins count up. */
   coinTick(): void {
-    this.bell(midi(91 + Math.floor(Math.random() * 3)), 0.06, { vol: 0.06, ratio: 2.01, index: 0.4, wet: 0 });
+    this.bloop(10 + Math.floor(Math.random() * 3), 0.35);
   }
-  /** Star k (0..2) popping in: each one higher and brighter. */
   star(k: number): void {
-    const r = this.style.root + 24;
-    this.bell(midi(r + [0, 4, 7][k]), 0.6, { vol: 0.18, ratio: 3, index: 1.2, wet: 0.5 });
-    this.bell(midi(r + 12 + [0, 4, 7][k]), 0.4, { vol: 0.08, ratio: 5, index: 0.8, delay: 0.05, wet: 0.5 });
-    this.noise(0.3, 0.04, 7000, { type: 'highpass', wet: 0.5 });
+    this.run(7 + k * 2, 10 + k * 2, 0.05, 0.9);
   }
-
   bigCapture(): void {
     this.duck(1.2);
-    const r = this.style.root;
-    [0, 4, 7, 12, 16].forEach((d, i) => this.bell(midi(r + 12 + d), 0.6, { vol: 0.15, delay: i * 0.07, ratio: 3, pan: (i - 2) * 0.2 }));
-    this.noise(0.9, 0.05, 7000, { type: 'highpass', delay: 0.25, wet: 0.6 }); // shimmer
+    this.run(0, 12, 0.04, 0.9);
   }
   power(): void {
-    for (let i = 0; i < 8; i++) this.bell(midi(76 + i * 2), 0.25, { vol: 0.1, delay: i * 0.035, ratio: 5, pan: (i % 2 ? 0.3 : -0.3) });
+    this.run(5, 15, 0.03, 0.7);
   }
   rumble(): void {
-    this.noise(0.8, 0.22, 220, { sweep: 0.6 });
-    this.tone(60, 0.7, { type: 'sine', vol: 0.3, slide: 0.6 });
+    for (let i = 0; i < 6; i++) this.bloop(-6 + Math.floor(Math.random() * 3), 0.6, i * 0.09, 2);
   }
   countdown(final: boolean): void {
-    if (final) {
-      [0, 4, 7, 12].forEach((d) => this.tone(midi(this.style.root + 12 + d), 0.45, { type: 'triangle', vol: 0.12, cutoff: 4000, wet: 0.3 }));
-      this.noise(0.3, 0.06, 6000, { type: 'highpass', wet: 0.4 });
-    } else {
-      this.tone(880, 0.08, { type: 'sine', vol: 0.18 }); // wood-block tick
-      this.noise(0.03, 0.08, 2500, { type: 'bandpass', q: 4 });
-    }
+    if (final) this.run(5, 10, 0.04, 0.9);
+    else this.bloop(5, 0.8);
   }
   win(): void {
     this.duck(3);
-    const r = this.style.root;
-    // fanfare: chord stab, rising arpeggio, final big chord with shimmer
-    [0, 4, 7].forEach((d) => this.tone(midi(r + d), 0.3, { type: 'sawtooth', vol: 0.06, cutoff: 2600, sweep: 0.5, detune: 9 }));
-    [0, 4, 7, 12, 16, 19].forEach((d, i) => this.bell(midi(r + 12 + d), 0.4, { vol: 0.15, delay: 0.25 + i * 0.08, ratio: 3, pan: (i - 2.5) * 0.15 }));
-    [0, 4, 7, 12].forEach((d) => this.tone(midi(r + d), 1.2, { type: 'sawtooth', vol: 0.06, cutoff: 3200, sweep: 0.4, detune: 9, delay: 0.8, wet: 0.4 }));
-    this.noise(1.2, 0.05, 8000, { type: 'highpass', delay: 0.8, wet: 0.6 });
+    // a happy fountain of bubbles: up, up and up
+    this.run(0, 10, 0.06, 0.9);
+    this.run(5, 15, 0.06, 0.8, 0.7);
+    this.bubbles(10, 0.7);
   }
   lose(): void {
     this.duck(2.5);
-    // sad trombone-ish "wah wah wah wahhh"
-    [67, 66, 65, 64].forEach((n, i) =>
-      this.tone(midi(n - 12), i === 3 ? 0.9 : 0.3, { type: 'sawtooth', vol: 0.07, cutoff: 900, sweep: 0.6, delay: i * 0.32, vib: i === 3 ? 0.02 : 0, vibRate: 6, wet: 0.2 }),
-    );
+    // slow bubbles sinking down
+    this.run(7, 0, 0.16, 0.7);
   }
 
   // ---------- music ----------
 
-  /** Pick the tune for an island; `calm` is the gentle world-map version (no drums). */
-  setMusicStyle(level: number, calm: boolean): void {
+  /** Pick the tune for an island; the same plain music plays on the map and in matches. */
+  setMusicStyle(level: number, _calm: boolean): void {
     const st = STYLES[level % STYLES.length];
     const changed = st !== this.style;
     this.style = st;
-    this.calm = calm;
-    this.hurry = false;
     if (changed) {
       this.buildMelody();
       this.step = 0;
@@ -508,22 +352,12 @@ export class Sound {
     g.setTargetAtTime(0.2, t + seconds, 0.6);
   }
 
-  private tension = 0;
-  /** 0..1: how risky your trail is; adds a pulsing low line to the music. */
-  setTension(v: number): void {
-    this.tension = v;
-  }
-
-  private leading = false;
-  /** While you're in 1st place, a sparkly extra layer joins the music. */
-  setLeading(v: boolean): void {
-    this.leading = v;
-  }
+  /** Kept for callers; the plain music doesn't react to danger or leading. */
+  setTension(_v: number): void {}
+  setLeading(_v: boolean): void {}
 
   /** Speed up a little for the last seconds of a match. */
-  setHurry(v: boolean): void {
-    this.hurry = v;
-  }
+  setHurry(_v: boolean): void {}
 
   private buildMelody(): void {
     // A fixed tune per island: mostly chord tones on strong beats, scale steps in between.
@@ -563,9 +397,8 @@ export class Sound {
     const ctx = this.ctx;
     if (!ctx || !this.musicGain) return;
     const st = this.style;
-    // Calm and dreamy: slower, no drums; a little livelier in the last half minute.
-    const bpm = st.bpm * 0.78 * (this.calm ? 0.9 : 1) * (this.hurry ? 1.1 : 1);
-    const stepDur = 60 / bpm / 2; // eighth notes
+    // Plain and soft: long held chords and a slow, gentle melody. Nothing percussive.
+    const stepDur = 60 / (st.bpm * 0.7) / 2;
     const dest = this.musicGain;
     const scale = st.minor ? MINOR : MAJOR;
     const prog = st.minor ? PROG_MINOR : PROG_MAJOR;
@@ -574,36 +407,17 @@ export class Sound {
       const delay = Math.max(0, this.nextNoteTime - ctx.currentTime);
       const chordDeg = prog[Math.floor(i / 8) % 4];
       const chordRoot = st.root - 12 + scale[chordDeg % 7];
-
-      // lead: a soft music box
-      const n = this.melody[i];
-      if (n > 0) {
-        this.bell(midi(n + 12), 0.9, { vol: 0.22, delay, ratio: 3.01, index: 0.7, dest, wet: 0 });
-        if (st.lead === 'flute') this.tone(midi(n + 12), 0.5, { type: 'sine', vol: 0.1, attack: 0.06, vib: 0.005, vibRate: 5, delay, dest });
-      }
-      // gentle sustained bass, once per bar
-      if (i % 8 === 0) this.tone(midi(chordRoot - 12), stepDur * 8, { type: 'sine', vol: 0.32, attack: 0.12, delay, dest });
-      // warm pad
+      // held chord for the whole bar, fading in and out
       if (i % 8 === 0) {
-        const third = scale[(chordDeg + 2) % 7] + (chordDeg + 2 >= 7 ? 12 : 0);
-        const fifth = scale[(chordDeg + 4) % 7] + (chordDeg + 4 >= 7 ? 12 : 0);
-        for (const d of [0, third - scale[chordDeg % 7], fifth - scale[chordDeg % 7]])
-          this.tone(midi(chordRoot + 12 + d), stepDur * 8.5, { type: 'triangle', vol: 0.07, attack: 0.5, cutoff: 1400, detune: 6, delay, dest });
+        const third = scale[(chordDeg + 2) % 7] + (chordDeg + 2 >= 7 ? 12 : 0) - scale[chordDeg % 7];
+        const fifth = scale[(chordDeg + 4) % 7] + (chordDeg + 4 >= 7 ? 12 : 0) - scale[chordDeg % 7];
+        const len = stepDur * 9;
+        this.tone(midi(chordRoot - 12), len, { type: 'sine', vol: 0.22, attack: 0.8, delay, dest });
+        for (const d of [0, third, fifth]) this.tone(midi(chordRoot + 12 + d), len, { type: 'sine', vol: 0.08, attack: 0.9, detune: 5, delay, dest });
       }
-      // water ripples: a slow rising arpeggio every other bar
-      if (i % 16 >= 12 && i % 2 === 0) {
-        const deg = chordDeg + [0, 2, 4, 7][(i % 16 - 12) / 2];
-        this.bell(midi(st.root + 24 + scale[deg % 7] + 12 * Math.floor(deg / 7)), 0.6, { vol: 0.06, ratio: 2.01, index: 0.4, delay, dest, wet: 0 });
-      }
-      // leader layer: sparkles while you're in 1st place
-      if (this.leading && !this.calm && i % 2 === 1) {
-        const deg = chordDeg + [0, 2, 4, 2][Math.floor(i / 2) % 4];
-        this.bell(midi(st.root + 36 + scale[deg % 7] + 12 * Math.floor(deg / 7)), 0.35, { vol: 0.04, ratio: 4, index: 0.4, delay, dest, wet: 0 });
-      }
-      // danger: the pad swells a little higher (no pulse)
-      if (this.tension > 0.5 && !this.calm && i % 8 === 4) {
-        this.tone(midi(chordRoot + 24 + scale[(chordDeg + 4) % 7] - scale[chordDeg % 7]), stepDur * 4, { type: 'sine', vol: 0.04 + this.tension * 0.04, attack: 0.3, vib: 0.01, vibRate: 6, delay, dest });
-      }
+      // slow melody: only the strong notes, long and soft
+      const n = this.melody[i];
+      if (n > 0 && i % 2 === 0) this.tone(midi(n + 12), stepDur * 3.5, { type: 'sine', vol: 0.13, attack: 0.18, vib: 0.004, vibRate: 4.5, delay, dest });
       this.nextNoteTime += stepDur;
       this.step++;
     }

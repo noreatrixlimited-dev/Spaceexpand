@@ -1001,6 +1001,13 @@ $('quitBtn').onclick = () => {
   startAttract();
 };
 const againBtn = $<HTMLButtonElement>('againBtn');
+/** The results button that counts down: Next island after a win, Menu after a loss. */
+function countdownButton(): HTMLElement {
+  return nextIsland ? againBtn : $('menuBtn');
+}
+function countdownLabel(): string {
+  return nextIsland ? 'Next island' : 'Menu';
+}
 againBtn.onclick = () => {
   replayLeft = -1;
   sound.click();
@@ -1116,19 +1123,16 @@ function loop(now: number): void {
     }
   }
 
-  // Quick replay: the next match starts by itself unless the player heads to the menu.
+  // After the results, head back to the world map by itself: a win rides on to the next
+  // island, a loss returns to the menu (Try again is one tap away).
   if (replayLeft > 0 && phase === 'over' && !$('results').classList.contains('hidden')) {
     const before = Math.ceil(replayLeft);
     replayLeft -= dt;
     const n = Math.ceil(replayLeft);
-    if (n !== before || !againBtn.dataset.count) {
-      againBtn.dataset.count = String(n);
-      againBtn.textContent = `${nextIsland ? 'Next island' : 'Try again'} (${Math.max(0, n)})`;
-    }
+    if (n !== before) countdownButton().textContent = `${countdownLabel()} (${Math.max(0, n)})`;
     if (replayLeft <= 0) {
       replayLeft = -1;
-      if (nextIsland) startAttract();
-      else startMatch();
+      startAttract();
     }
   }
   if (phase === 'over') {
@@ -1137,7 +1141,8 @@ function loop(now: number): void {
       showScreen('results');
       hud.show(false);
       replayLeft = 5;
-      againBtn.textContent = `${nextIsland ? 'Next island' : 'Try again'} (5)`;
+      againBtn.textContent = nextIsland ? 'Next island (5)' : 'Try again';
+      $('menuBtn').textContent = nextIsland ? 'World map' : 'Menu (5)';
     }
   }
 
