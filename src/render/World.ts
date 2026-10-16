@@ -3,7 +3,7 @@ import { CONFIG, PLAYER_COLORS, UNIT } from '../config';
 import type { Game, GameEvent } from '../core/Game';
 import { BallsView } from './BallsView';
 import { Blob } from './Blob';
-import { Critter } from './Critter';
+import { Bubble, BubbleTrail } from './Bubble';
 import { EggView } from './Egg';
 import { toon } from './materials';
 import { Particles } from './Particles';
@@ -14,7 +14,7 @@ import { Territory } from './Territory';
 import { WorldMap } from './WorldMap';
 import { getSkin, type Skin } from '../skins';
 
-type Avatar = Blob | Critter;
+type Avatar = Blob | Bubble;
 const SWOOP_TIME = 2.6;
 export type Quality = 'high' | 'low';
 export type CameraMode = 'follow' | 'overview' | 'orbit';
@@ -26,6 +26,7 @@ export class World {
   readonly camera = new THREE.PerspectiveCamera(38, 1, 0.5, 600);
   private readonly sun: THREE.DirectionalLight;
   private readonly particles = new Particles();
+  private readonly bubbles = new BubbleTrail();
   private readonly starMesh: THREE.Mesh;
   private readonly matchGroup = new THREE.Group();
   private game: Game | null = null;
@@ -95,7 +96,7 @@ export class World {
     this.readyRing.rotation.x = -Math.PI / 2;
     this.readyRing.renderOrder = 2;
     this.readyRing.visible = false;
-    this.scene.add(this.matchGroup, this.particles.mesh, this.starMesh, this.readyRing);
+    this.scene.add(this.matchGroup, this.particles.mesh, this.bubbles.mesh, this.starMesh, this.readyRing);
     this.buildPost();
     this.resize();
   }
@@ -194,9 +195,9 @@ export class World {
     this.avatarPos = [];
     this.nestPos = [];
     for (const p of game.players) {
-      const b: Avatar = this.art ? new Critter(p.id, p.isHuman, this.art.character, this.skins[p.id]) : new Blob(p.id, p.isHuman);
+      const b: Avatar = new Bubble(p.id, p.isHuman, this.skins[p.id]);
       this.avatars.push(b);
-      if (p.id === bossId) b.root.scale.setScalar(1.4); // the boss is a big robot
+      if (p.id === bossId) b.root.scale.setScalar(1.4); // the boss is a big bubble
       const pos = this.gridPos(p.px, p.py);
       this.avatarPos.push(pos.clone());
       b.root.position.copy(pos);
@@ -371,20 +372,16 @@ export class World {
         this.turnVis[p.id] += (rate - this.turnVis[p.id]) * Math.min(1, dt * 8);
         b.lean = this.turnVis[p.id] / CONFIG.turnRate;
         b.update(dt, this.time);
-        // Snow spray off the board: a light dusting while gliding, a burst when carving hard.
+        // Little bubbles stream out behind a moving bubble (more when turning hard).
         if (b.moving && p.status === 'alive') {
           const carve = Math.min(1, Math.abs(b.lean));
-          this.sprayAcc[p.id] += dt * (5 + carve * 45) * p.glide;
-          const n = Math.floor(this.sprayAcc[p.id]);
-          if (n > 0) {
-            this.sprayAcc[p.id] -= n;
-            const fx = Math.cos(p.heading);
-            const fz = Math.sin(p.heading);
-            // outside of the turn: right turns throw snow to the left, and vice versa
-            const s = b.lean >= 0 ? -1 : 1;
-            const side = new THREE.Vector3(-fz * s, 0, fx * s).multiplyScalar(0.6 + carve).addScaledVector(new THREE.Vector3(-fx, 0, -fz), 0.5);
-            const tail = cur.clone().add(new THREE.Vector3(-fx * 0.45, 0.12, -fz * 0.45));
-            this.particles.spray(tail, side, n);
+          this.sprayAcc[p.id] += dt * (9 + carve * 10) * Math.max(0.4, p.glide);
+          const fx = Math.cos(p.heading);
+          const fz = Math.sin(p.heading);
+          while (this.sprayAcc[p.id] >= 1) {
+            this.sprayAcc[p.id] -= 1;
+            const tail = cur.clone().add(new THREE.Vector3(-fx * 0.5, 0.35 + Math.random() * 0.4, -fz * 0.5));
+            this.bubbles.emit(tail, new THREE.Vector3(-fx, 0, -fz), PLAYER_COLORS[p.id]);
           }
           // Skin trail effect.
           const skin = this.skins[p.id];
@@ -411,7 +408,7 @@ export class World {
         egg.threatened = c.threatened;
         if (c.state === 'carried' && c.carrier >= 0) {
           const carrierPos = this.avatarPos[c.carrier];
-          egg.egg.position.lerp(tmp.copy(carrierPos).setY(carrierPos.y + (this.art ? 1.6 : 0.75)), 1 - Math.exp(-dt * 20));
+          egg.egg.position.lerp(tmp.copy(carrierPos).setY(carrierPos.y + 1.4), 1 - Math.exp(-dt * 20));
         } else {
           egg.egg.position.lerp(this.nestPos[p.id], 1 - Math.exp(-dt * 10));
         }
@@ -431,6 +428,7 @@ export class World {
       }
     }
     this.particles.update(dt);
+    this.bubbles.update(dt);
     this.scenery?.update(dt, game ? game.voidRing : 0);
     this.updateCamera(dt);
     if (this.post) this.post.render(dt);

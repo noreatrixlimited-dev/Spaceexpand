@@ -2,8 +2,7 @@ import * as THREE from 'three';
 import { PLAYER_COLORS } from '../config';
 import { Rng } from '../core/rng';
 import { eventMap, LEVEL_MAPS, mapInset, mapOutline, type MapDef } from '../maps';
-import { Blob } from './Blob';
-import { Critter } from './Critter';
+import { Bubble, BubbleTrail } from './Bubble';
 import { toon } from './materials';
 import type { Art } from './Scenery';
 import { getSkin } from '../skins';
@@ -43,10 +42,11 @@ export class WorldMap {
   private readonly dotTodo = toon('#ffffff', { roughness: 0.5, transparent: true, opacity: 0.75 });
   private readonly sea: THREE.ShaderMaterial;
   private readonly clouds: THREE.Group[] = [];
-  private robot: Critter | Blob;
+  private robot: Bubble;
+  private readonly bubbles = new BubbleTrail();
+  private bubbleAcc = 0;
   private robotSlot = -1;
   private robotSkin = -1;
-  private art: Art | null = null;
   private time = 0;
   private camTarget = new THREE.Vector3();
   private pan = new THREE.Vector3();
@@ -56,8 +56,7 @@ export class WorldMap {
   /** Seconds left of the arrival bounce. */
   private arrive = 0;
 
-  constructor(art: Art | null, slot: number, skin = 0) {
-    this.art = art;
+  constructor(_art: Art | null, slot: number, skin = 0) {
     this.scene.background = new THREE.Color('#bfe9f7');
     this.scene.add(new THREE.HemisphereLight('#ffffff', '#9fc9e0', 1.9));
     const sun = new THREE.DirectionalLight('#fff6e6', 2.0);
@@ -65,6 +64,7 @@ export class WorldMap {
     this.scene.add(sun);
 
     this.sea = this.buildSea();
+    this.scene.add(this.bubbles.mesh);
     this.dotDone = toon(PLAYER_COLORS[slot], { roughness: 0.4 });
     LEVEL_MAPS.forEach((m, i) => this.islands.push(this.buildIsland(m, i)));
     this.buildPaths();
@@ -73,11 +73,11 @@ export class WorldMap {
     this.robot = this.makeRobot(slot, skin);
   }
 
-  private makeRobot(slot: number, skin: number): Critter | Blob {
+  private makeRobot(slot: number, skin: number): Bubble {
     if (this.robot) this.scene.remove(this.robot.root);
     this.robotSlot = slot;
     this.robotSkin = skin;
-    const r = this.art ? new Critter(slot, false, this.art.character, getSkin(skin)) : new Blob(slot, false);
+    const r = new Bubble(slot, false, getSkin(skin));
     r.root.scale.setScalar(1.7);
     this.scene.add(r.root);
     return r;
@@ -375,6 +375,17 @@ export class WorldMap {
     r.moving = moving;
     r.lean = moving ? Math.sin(this.time * 2.2) * 0.4 : 0;
     r.update(dt, this.time);
+    // bubbles stream out behind while surfing between islands
+    if (moving) {
+      this.bubbleAcc += dt * 18;
+      while (this.bubbleAcc >= 1) {
+        this.bubbleAcc -= 1;
+        const at = this.robotPos.clone();
+        at.y += 0.5 + Math.random() * 0.6;
+        this.bubbles.emit(at, new THREE.Vector3((Math.random() - 0.5) * 0.6, 0, (Math.random() - 0.5) * 0.6), PLAYER_COLORS[this.robotSlot]);
+      }
+    }
+    this.bubbles.update(dt);
 
     // Camera: a tilted view centred on the robot (plus any drag).
     // Aim a bit south of the robot so its island sits in the open space above the card.

@@ -48,7 +48,7 @@ export function missionText(m: Mission): string {
     case 'eggs':
       return m.target === 1 ? 'Capture a nest' : `Capture ${m.target} nests`;
     case 'bonks':
-      return `Cut ${m.target} robot trails`;
+      return `Cut ${m.target} bubble trails`;
     case 'throws':
       return `Throw ${m.target} paint balls`;
     case 'stars':

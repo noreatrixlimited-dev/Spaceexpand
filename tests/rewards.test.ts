@@ -18,7 +18,7 @@ describe('rewards', () => {
   it('losing the final duel says how many robots you outlasted', () => {
     const r = rewardFor({ ...base, captured: true, outlasted: 2 });
     expect(r.title).toBe('Final duel!');
-    expect(r.note).toContain('2 robots');
+    expect(r.note).toContain('2 bubbles');
   });
   it('wins earn stars and more coins; first win of the day is a bonus', () => {
     const win = { ...base, won: true, rank: 1, peakPct: 40, heartsLost: 0 };

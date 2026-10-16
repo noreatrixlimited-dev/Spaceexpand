@@ -68,7 +68,7 @@ export function rewardFor(m: MatchSummary): Reward {
     note = stars < 3 ? (m.peakPct < 35 ? 'Grab 35% land for another star' : 'Win without losing an egg heart for 3 stars') : 'Three stars!';
   } else if (m.captured && m.rank === 2) {
     title = 'Final duel!';
-    note = `You outlasted ${m.outlasted} robot${m.outlasted === 1 ? '' : 's'}, so close!`;
+    note = `You outlasted ${m.outlasted} bubble${m.outlasted === 1 ? '' : 's'}, so close!`;
   } else if (!m.captured && m.rank === 2 && m.rivalPct - m.finalPct < 10) {
     title = 'So close!';
     note = `Only ${Math.max(0.1, m.rivalPct - m.finalPct).toFixed(1)}% behind 1st place`;
@@ -77,7 +77,7 @@ export function rewardFor(m: MatchSummary): Reward {
     note = '2nd place, just behind the winner';
   } else {
     title = 'Nice try!';
-    note = m.outlasted > 0 ? `You outlasted ${m.outlasted} robot${m.outlasted === 1 ? '' : 's'}` : `You grabbed ${m.peakPct.toFixed(0)}% of the island`;
+    note = m.outlasted > 0 ? `You outlasted ${m.outlasted} bubble${m.outlasted === 1 ? '' : 's'}` : `You grabbed ${m.peakPct.toFixed(0)}% of the island`;
   }
 
   return { coins, breakdown, stars, title, note, tip: m.won ? '' : tipFor(m) };
@@ -86,10 +86,10 @@ export function rewardFor(m: MatchSummary): Reward {
 /** One short, useful tip based on how the match was lost. */
 export function tipFor(m: MatchSummary): string {
   if (m.eggStolen) return 'Tip: chase the thief and bump them to send your egg home.';
-  if (m.captured && m.heartsLost >= 3) return 'Tip: stay near your nest when robots come close; bump them away.';
-  if (m.bonked >= 2) return 'Tip: keep loops short when robots are nearby.';
-  if (m.throws < 5) return 'Tip: throw paint balls! Splats paint land and stun robots.';
-  if (m.peakPct < 15) return 'Tip: make big loops early while the robots are far away.';
+  if (m.captured && m.heartsLost >= 3) return 'Tip: stay near your nest when bubbles come close; bump them away.';
+  if (m.bonked >= 2) return 'Tip: keep loops short when bubbles are nearby.';
+  if (m.throws < 5) return 'Tip: throw paint balls! Splats paint land and stun bubbles.';
+  if (m.peakPct < 15) return 'Tip: make big loops early while the others are far away.';
   return 'Tip: grab the star in the middle for a power-up.';
 }
 

@@ -451,7 +451,7 @@ function startMatch(): void {
   newGame(store.settings.slot);
   world.showAtlas = false;
   world.startSwoop();
-  if (bossId >= 0) window.setTimeout(() => hud.toast('Boss island! Beat the big robot', true), 3300);
+  if (bossId >= 0) window.setTimeout(() => hud.toast('Boss island! Beat the big bubble', true), 3300);
   if (retryBoost && human !== null) {
     // Second try on the same island: a head start, and we say so.
     const me = game.players[human];
