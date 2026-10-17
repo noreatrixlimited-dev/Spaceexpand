@@ -54,7 +54,11 @@ export const CONFIG = {
 
   starFirst: 25,
   starInterval: 25,
-  powerSeconds: { speed: 5, shield: 8, freeze: 10 },
+  powerSeconds: { speed: 5, shield: 8, big: 6 },
+  /** Big Bubble power: how much farther it reaches when bumping others. */
+  bigReach: 1.8,
+  puddleSlow: 0.6, // speed multiplier inside a puddle
+  windSpeed: 0.9 * UNIT, // cells per second of sideways drift on windy islands
 } as const;
 
 export type StartMode = 'patch' | 'quadrant';
@@ -71,7 +75,7 @@ export interface MatchOptions {
   tutorial?: boolean;
 }
 
-export const PLAYER_NAMES = ['Grape', 'Cherry', 'Berry', 'Lime'];
+export const PLAYER_NAMES = ['Fizzy', 'Poppy', 'Bloop', 'Suds'];
 // P1 top-left, P2 bottom-left, P3 bottom-right, P4 top-right (matches the original sketch)
 export const PLAYER_COLORS = ['#9b5de5', '#f25454', '#3d9df2', '#5bbf3f'];
 export const PLAYER_COLORS_SOFT = ['#c9a8f5', '#ffa3a3', '#9fd0ff', '#a7e38f'];

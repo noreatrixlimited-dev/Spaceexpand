@@ -8,7 +8,7 @@ const smallSphere = new THREE.SphereGeometry(1, 12, 8);
 const dizzyStar = starGeometry(0.11, 0.05, 0.04);
 const crownGeo = crownGeometry();
 
-export type BlobMood = 'normal' | 'bonked' | 'ghost' | 'happy' | 'sad';
+export type BlobMood = 'normal' | 'bonked' | 'ghost' | 'happy' | 'sad' | 'scared';
 
 /** A squishy round blob with big eyes and tiny feet. */
 export class Blob {

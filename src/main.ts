@@ -22,6 +22,7 @@ import { World } from './render/World';
 import { Hud } from './ui/Hud';
 import { Store } from './ui/Store';
 import { rewardFor, skinPrice } from './ui/Rewards';
+import { ACHIEVEMENTS, bumpStreak, liveStreak, newAchievements, weeklyWin, WEEKLY_REWARD, WEEKLY_TARGET, type ProgressFacts } from './ui/Progress';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -45,7 +46,7 @@ let humanOut = false;
 let log = { heartsLost: 0, bonked: 0, stolen: false, outlasted: 0, combos: 0 };
 /** Give the next match a head start (after a loss on the same island). */
 let retryBoost = false;
-/** The boss robot on boss islands (-1 otherwise). */
+/** The boss bubble on boss islands (-1 otherwise). */
 let bossId = -1;
 let nextIsland = false; // the results screen leads on to the world map // your nest fell: you watch the rest of the match
 let phase: Phase = 'menu';
@@ -57,7 +58,7 @@ let lastTick = 0;
 
 // ---------- screens ----------
 
-const screens = ['title', 'howto', 'settings', 'pause', 'results'] as const;
+const screens = ['title', 'howto', 'settings', 'pause', 'results', 'trophies'] as const;
 type Screen = (typeof screens)[number];
 let returnTo: Screen = 'title';
 
@@ -173,6 +174,66 @@ function skinOwned(k: number): boolean {
 
 function updateCoins(): void {
   $('coinPill').textContent = String(store.stats.coins);
+  const st = liveStreak(store.stats.streak, today());
+  $('streakPill').classList.toggle('hidden', st < 1);
+  $('streakPill').textContent = `${st} day${st === 1 ? '' : 's'}`;
+}
+
+function progressFacts(): ProgressFacts {
+  const st = store.stats;
+  const stars = Object.values(st.stars);
+  return {
+    wins: st.wins,
+    games: st.games,
+    trailsCut: st.trailsCut,
+    nests: st.eggsCaptured,
+    bestLand: st.bestLandPct,
+    stars: stars.reduce((a, b) => a + b, 0),
+    perfects: stars.filter((n) => n >= 3).length,
+    islandsWon: beatenCount(),
+    skins: SKINS.filter((_, k) => skinOwned(k)).length,
+    bestStreak: st.streak.best,
+  };
+}
+
+/** Claim any achievements just reached; returns lines for the results card. */
+function claimAchievements(): string[] {
+  const got = newAchievements(progressFacts(), store.stats.achievements);
+  for (const a of got) {
+    store.stats.achievements.push(a.id);
+    store.stats.coins += a.reward;
+  }
+  if (got.length) store.save();
+  return got.map((a) => `Achievement: ${a.name} +${a.reward}`);
+}
+
+function buildTrophies(): void {
+  const st = store.stats;
+  const streak = liveStreak(st.streak, today());
+  const w = st.weekly.week === weekNumber() ? st.weekly : { islands: [] as string[], done: false };
+  $('trophyTop').innerHTML = `
+    <div class="trophy-box"><b>${streak}</b><small>day streak</small><em>best ${st.streak.best}</em></div>
+    <div class="trophy-box wide${w.done ? ' done' : ''}"><small>Weekly challenge</small>
+      <div class="m-text">Win on ${WEEKLY_TARGET} different islands</div>
+      <div class="m-bar"><i style="width:${(Math.min(WEEKLY_TARGET, w.islands.length) / WEEKLY_TARGET) * 100}%"></i></div>
+      <em>${w.done ? 'Done!' : `${w.islands.length}/${WEEKLY_TARGET} · <span class="coin-ico"></span>${WEEKLY_REWARD}`}</em></div>`;
+  const owned = SKINS.filter((_, k) => skinOwned(k)).length;
+  $('collection').innerHTML =
+    `<div class="collect-count">${owned} / ${SKINS.length} skins</div>` +
+    SKINS.map((sk, k) => {
+      const have = skinOwned(k);
+      const swatch = [sk.body ?? '#ffffff', sk.deck];
+      const how = have ? 'Owned' : sk.special === 'event' ? 'Weekly event' : sk.special === 'gift' ? 'Day 7 gift' : `Island ${sk.unlockAt}`;
+      return `<div class="skin-card${have ? '' : ' locked'}"><span class="sw">${swatch.map((c) => `<i style="background:${c}"></i>`).join('')}</span><b>${sk.name}</b><small>${how}</small></div>`;
+    }).join('');
+  const f = progressFacts();
+  $('achList').innerHTML = ACHIEVEMENTS.map((a) => {
+    const [v, t] = a.progress(f);
+    const done = st.achievements.includes(a.id);
+    return `<div class="mission${done ? ' done' : ''}"><div class="m-text">${a.name} <small>${a.desc}</small></div>
+      <div class="m-bar"><i style="width:${(v / t) * 100}%"></i></div>
+      <div class="m-reward">${done ? 'Done' : `<span class="coin-ico"></span>${a.reward}`}</div></div>`;
+  }).join('');
 }
 
 function buildSkinPicker(): void {
@@ -275,7 +336,7 @@ function openWorldMap(): void {
   showIslandCard();
 }
 
-/** Tap an island to ride there; drag to look around. */
+/** Tap an island to float there; drag to look around. */
 function setupMapTouch(): void {
   const canvas = $('scene');
   let down: { x: number; y: number; moved: number } | null = null;
@@ -355,14 +416,14 @@ function updateStatsLine(): void {
   const s = store.stats;
   $('statsLine').textContent = s.games
     ? `Wins ${s.wins} / ${s.games} games  ·  Best land ${s.bestLandPct}%  ·  Eggs nabbed ${s.eggsCaptured}`
-    : 'Tip: drag to ride, tap to throw!';
+    : 'Tip: drag to float, tap to throw!';
 }
 
 function syncSettingsUI(): void {
   const s = store.settings;
+  ($('volume') as HTMLInputElement).value = String(Math.round(s.volume * 100));
+  document.querySelectorAll<HTMLButtonElement>('#haptics button').forEach((b) => b.classList.toggle('on', b.dataset.h === s.haptics));
   const map: Record<string, boolean> = {
-    sfx: s.sfx,
-    vibrate: s.vibrate,
     dpad: s.controls === 'dpad',
     quality: s.quality === 'high',
     hardMode: s.hardMode,
@@ -374,7 +435,8 @@ function syncSettingsUI(): void {
 }
 
 function applySettings(): void {
-  sound.sfxOn = store.settings.sfx;
+  sound.sfxOn = store.settings.volume > 0;
+  sound.volume = store.settings.volume;
   sound.applyVolumes();
   $('dpad').classList.toggle('hidden', store.settings.controls !== 'dpad' || phase === 'menu');
 }
@@ -445,6 +507,8 @@ function startMatch(): void {
   world.showAtlas = false;
   world.startSwoop();
   if (bossId >= 0) window.setTimeout(() => hud.toast('Boss island! Beat the big bubble', true), 3300);
+  if (game.map.hazard === 'puddles') window.setTimeout(() => hud.toast('Puddles slow you down!', true), 4200);
+  if (game.map.hazard === 'wind') window.setTimeout(() => hud.toast('Windy island! Bubbles drift', true), 4200);
   if (retryBoost && human !== null) {
     // Second try on the same island: a head start, and we say so.
     const me = game.players[human];
@@ -496,7 +560,7 @@ function startTutorial(): void {
   tutorialStep = 0;
   tutorialTimer = 0;
   coach.classList.remove('hidden');
-  setCoach('Drag to ride out!', 'drag');
+  setCoach('Drag to float out!', 'drag');
 }
 
 function endTutorial(): void {
@@ -513,7 +577,7 @@ function tutorialProgress(events: GameEvent[]): void {
   const me = game.players[human];
   if (tutorialStep === 0 && me.trail.length >= 4 * UNIT) {
     tutorialStep = 1;
-    setCoach('Now ride back to your colour!', 'none');
+    setCoach('Now float back to your colour!', 'none');
   }
   for (const e of events) {
     if (tutorialStep === 1 && e.type === 'capture' && e.pid === human) {
@@ -524,7 +588,7 @@ function tutorialProgress(events: GameEvent[]): void {
     } else if (tutorialStep === 2 && e.type === 'throw' && e.pid === human) {
       tutorialStep = 3;
       tutorialTimer = 1.6;
-      setCoach('Splat! Balls paint land and stun riders.', 'none');
+      setCoach('Splat! Balls paint land and stun bubbles.', 'none');
     }
   }
 }
@@ -561,8 +625,11 @@ function resume(): void {
   showScreen(null);
 }
 
+/** Haptics, scaled by the Vibration setting (Off / Light / Strong). */
 function vibrate(ms: number): void {
-  if (store.settings.vibrate && navigator.vibrate) navigator.vibrate(ms);
+  const h = store.settings.haptics;
+  if (h === 'off' || !navigator.vibrate) return;
+  navigator.vibrate(Math.max(4, Math.round(ms * (h === 'strong' ? 1.6 : 0.7))));
 }
 
 function handleEvents(events: GameEvent[]): void {
@@ -636,7 +703,7 @@ function handleEvents(events: GameEvent[]): void {
           hud.toast('Your egg was stolen! Bump the thief!', true);
         } else if (e.by === me) {
           hud.combo('Egg grabbed!', '#f08c00');
-          hud.toast('Ride to your colour to keep it!');
+          hud.toast('Float to your colour to keep it!');
         }
         break;
       case 'eggDropped':
@@ -671,17 +738,21 @@ function handleEvents(events: GameEvent[]): void {
         if (e.owner === me) hud.toast('Your nest scooted inward');
         break;
       case 'starSpawn':
-        if (game.time < CONFIG.starFirst + 1) hud.toast('A star appeared in the middle!');
+        if (game.time < CONFIG.starFirst + 1) hud.toast('A power bubble appeared in the middle!');
         break;
       case 'power':
         sound.power();
-        if (e.pid === me) hud.toast(e.power === 'speed' ? 'Zoom zoom!' : e.power === 'shield' ? 'Bubble shield!' : 'Clouds frozen!', true);
+        if (e.pid === me) hud.toast(e.power === 'speed' ? 'Speed foam!' : e.power === 'shield' ? 'Bubble shield!' : 'Big bubble! Bump them away', true);
         break;
       case 'throw':
-        if (e.pid === me) sound.whoosh();
+        if (e.pid === me) {
+          sound.whoosh();
+          vibrate(10);
+        }
         break;
       case 'splat':
         if (e.pid === me || e.hit) sound.splat(e.pid === me);
+        if (e.pid === me && e.hit) vibrate(30);
         break;
       case 'stun':
         if (e.pid === me) {
@@ -713,6 +784,12 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
   world.mode = 'overview';
   const won = winner === human;
   matchWon = won;
+  if (won) {
+    // Slow-motion finish, a bubble burst and a happy buzz.
+    slowLeft = 1.6;
+    world.celebrate(winner);
+    vibrate(90);
+  }
   if (won) sound.win();
   else sound.lose();
   hud.toast(won ? 'You win!' : 'Match over', true);
@@ -796,6 +873,12 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
       st.coins += m.reward;
       missionLines.push(`Mission done: ${missionText(m)} +${m.reward}`);
     }
+    // Daily streak and the weekly challenge.
+    if (bumpStreak(st.streak, todayStr()) && st.streak.count > 1) missionLines.push(`${st.streak.count}-day streak! Keep it going tomorrow`);
+    if (won && (lvl >= 0 || game.map.id === 'event') && weeklyWin(st.weekly, weekNumber(), game.map.id)) {
+      st.coins += WEEKLY_REWARD;
+      missionLines.push(`Weekly challenge done! +${WEEKLY_REWARD}`);
+    }
     if (lvl >= 0) st.stars[game.map.id] = Math.max(st.stars[game.map.id] ?? 0, reward.stars);
     // A loss on this island earns a head start on the next try here.
     retryBoost = !won && (lvl >= 0 || game.map.id === 'event');
@@ -859,6 +942,11 @@ function onGameOver(winner: number, reason: 'last' | 'time' | 'captured'): void 
     if (next > 0) lines.push(`${SKINS[next].name} skin: ${Math.min(st.coins, skinPrice(next))}/${skinPrice(next)} coins`);
   }
   lines.push(...missionLines);
+  // Achievements (checked after stats, stars and skins are all updated).
+  for (const l of claimAchievements()) {
+    lines.push(l);
+    window.setTimeout(() => hud.toast(l.replace(/ \+\d+$/, '!'), true), 2200);
+  }
   if (!won && retryBoost) lines.push('Retry boost ready: 3 balls + bubble shield');
   $('resultNext').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
 
@@ -899,6 +987,13 @@ const LOSS_TO_MENU = 0.9;
 let lossCardLeft = -1;
 /** Whether the match that just ended was won. */
 let matchWon = false;
+/** Real seconds left of the slow-motion finish after a win. */
+let slowLeft = 0;
+function slowMo(): number {
+  if (slowLeft <= 0) return 1;
+  // ease back to full speed over the last part
+  return 0.25 + 0.75 * Math.max(0, 1 - slowLeft / 0.6) * (slowLeft < 0.6 ? 1 : 0);
+}
 
 // ---------- wiring ----------
 
@@ -934,6 +1029,15 @@ $('customBtn').onclick = () => {
   sound.click();
   $('customize').classList.toggle('hidden');
 };
+$('trophyBtn').onclick = () => {
+  sound.unlock();
+  sound.click();
+  claimAchievements();
+  buildTrophies();
+  updateCoins();
+  returnTo = 'title';
+  showScreen('trophies');
+};
 $('howBtn').onclick = () => {
   sound.unlock();
   sound.click();
@@ -958,16 +1062,27 @@ document.querySelectorAll<HTMLElement>('.back').forEach((b) => {
     showScreen(returnTo);
   };
 });
+($('volume') as HTMLInputElement).oninput = (e) => {
+  store.settings.volume = Number((e.target as HTMLInputElement).value) / 100;
+  store.save();
+  sound.unlock();
+  applySettings();
+};
+($('volume') as HTMLInputElement).onchange = () => sound.bubbles(3, 0.8);
+document.querySelectorAll<HTMLButtonElement>('#haptics button').forEach((b) => {
+  b.onclick = () => {
+    store.settings.haptics = b.dataset.h as 'off' | 'light' | 'strong';
+    store.save();
+    syncSettingsUI();
+    sound.unlock();
+    sound.click();
+    vibrate(40);
+  };
+});
 document.querySelectorAll<HTMLInputElement>('[data-s]').forEach((el) => {
   el.onchange = () => {
     const s = store.settings;
     switch (el.dataset.s) {
-      case 'sfx':
-        s.sfx = el.checked;
-        break;
-      case 'vibrate':
-        s.vibrate = el.checked;
-        break;
       case 'dpad':
         s.controls = el.checked ? 'dpad' : 'swipe';
         break;
@@ -1093,9 +1208,11 @@ function loop(now: number): void {
       if (n > 0) {
         hud.countdown(String(n));
         sound.countdown(false);
+        vibrate(12);
       } else {
         hud.countdown('Go!');
         sound.countdown(true);
+        vibrate(40);
         if (store.stats.games < 3) {
           const touch = 'ontouchstart' in window;
           window.setTimeout(() => hud.toast(touch ? 'Drag to steer, tap to throw!' : 'WASD to steer, Space to throw!'), 900);
@@ -1119,7 +1236,7 @@ function loop(now: number): void {
   }
   if (phase === 'playing' || phase === 'over') {
     const step = 1 / CONFIG.tickRate;
-    accumulator += dt;
+    accumulator += dt * slowMo();
     let guard = 0;
     while (accumulator >= step && guard++ < 6) {
       game.tick(step);
@@ -1174,7 +1291,8 @@ function loop(now: number): void {
     sound.setRide(riding ? me.glide : 0, Math.min(1, Math.abs(me.turn) / CONFIG.turnRate));
   } else sound.setRide(0, 0);
   // Smooth out frame-time jitter for animation (the simulation still uses real time).
-  smoothDt += (dt - smoothDt) * 0.3;
+  smoothDt += (dt * slowMo() - smoothDt) * 0.3;
+  if (slowLeft > 0) slowLeft -= dt;
   world.frame(smoothDt);
   if (phase !== 'menu') hud.update(game, human, dt);
   requestAnimationFrame(loop);

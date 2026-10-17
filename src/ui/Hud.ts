@@ -137,10 +137,8 @@ export class Hud {
 
     if (p.power && p.powerTimer > 0) {
       this.power.classList.remove('hidden');
-      this.power.textContent = p.power === 'speed' ? `Zoom! ${Math.ceil(p.powerTimer)}` : `Bubble shield ${Math.ceil(p.powerTimer)}`;
-    } else if (game.voidFrozen > 0) {
-      this.power.classList.remove('hidden');
-      this.power.textContent = `Clouds frozen ${Math.ceil(game.voidFrozen)}`;
+      const name = p.power === 'speed' ? 'Speed foam' : p.power === 'big' ? 'Big bubble' : 'Bubble shield';
+      this.power.textContent = `${name} ${Math.ceil(p.powerTimer)}`;
     } else this.power.classList.add('hidden');
 
   }

@@ -95,8 +95,11 @@ export class Sound {
     if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume();
   }
 
+  /** 0..1 master volume for the bubble sounds. */
+  volume = 0.8;
+
   applyVolumes(): void {
-    if (this.sfxGain) this.sfxGain.gain.value = this.sfxOn ? 1 : 0;
+    if (this.sfxGain) this.sfxGain.gain.value = this.sfxOn ? this.volume * 1.25 : 0;
   }
 
   // ---------- building blocks ----------

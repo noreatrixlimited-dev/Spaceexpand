@@ -79,7 +79,12 @@ export class Particles {
     }
   }
 
-  /** Skin trail: a few little bits left behind the board. */
+  /** A wind streak: a small white puff carried along. */
+  wind(pos: THREE.Vector3, vel: THREE.Vector3): void {
+    this.spawn(pos, vel, '#ffffff', 0.05 + Math.random() * 0.04, 0.9, 0);
+  }
+
+  /** Skin trail: a few little bits left behind the bubble. */
   trail(pos: THREE.Vector3, kind: string, color: THREE.ColorRepresentation): void {
     const v = new THREE.Vector3((Math.random() - 0.5) * 0.5, 0, (Math.random() - 0.5) * 0.5);
     switch (kind) {

@@ -1,5 +1,6 @@
 import type { StartMode } from '../config';
 import type { MissionDay } from './Missions';
+import type { Streak, Weekly } from './Progress';
 
 export interface Settings {
   music: boolean;
@@ -10,6 +11,9 @@ export interface Settings {
   quality: 'high' | 'low';
   slot: number;
   vibrate: boolean;
+  /** Bubble sound volume 0..1. */
+  volume: number;
+  haptics: 'off' | 'light' | 'strong';
   seenHowTo: boolean;
   artVersion?: number;
   map: string;
@@ -42,6 +46,10 @@ export interface Stats {
   gift: { last: string; count: number };
   /** Weeks in which the event island was won. */
   eventWeeks: number[];
+  streak: Streak;
+  weekly: Weekly;
+  /** Achievement ids already claimed. */
+  achievements: string[];
 }
 
 const KEY = 'nestnappers.v1';
@@ -58,12 +66,14 @@ const defaults = (): { settings: Settings; stats: Stats } => ({
     quality: 'high',
     slot: 0,
     vibrate: true,
+    volume: 0.8,
+    haptics: 'light',
     seenHowTo: false,
     map: 'clover',
     tutorialDone: false,
     skin: 0,
   },
-  stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '', unlocked: 1, champion: false, coins: 0, stars: {}, lastWinDay: '', owned: [], missions: null, gift: { last: '', count: 0 }, eventWeeks: [] },
+  stats: { games: 0, wins: 0, bestLandPct: 0, eggsCaptured: 0, trailsCut: 0, recent: '', unlocked: 1, champion: false, coins: 0, stars: {}, lastWinDay: '', owned: [], missions: null, gift: { last: '', count: 0 }, eventWeeks: [], streak: { last: '', count: 0, best: 0 }, weekly: { week: -1, islands: [], done: false }, achievements: [] },
 });
 
 /** Settings and lifetime stats, saved in localStorage (best effort). */
@@ -80,6 +90,9 @@ export class Store {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<{ settings: Settings; stats: Stats }>;
         this.settings = { ...d.settings, ...parsed.settings };
+        // Older saves had on/off switches for sound and vibration.
+        if (parsed.settings && parsed.settings.haptics === undefined) this.settings.haptics = parsed.settings.vibrate === false ? 'off' : 'light';
+        if (parsed.settings && parsed.settings.volume === undefined) this.settings.volume = parsed.settings.sfx === false ? 0 : 0.8;
         if ((this.settings.artVersion ?? 1) < ART_VERSION) {
           this.settings.quality = 'high';
           this.settings.artVersion = ART_VERSION;

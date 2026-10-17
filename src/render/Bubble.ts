@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PLAYER_COLORS } from '../config';
-import { SKINS, type Skin } from '../skins';
+import { SKINS, type PatternKind, type Skin } from '../skins';
 import type { BlobMood } from './Blob';
 import { buildHat } from './hats';
 import { toon } from './materials';
@@ -18,7 +18,15 @@ const HOVER = 0.1; // floats a little above the ground
  * Soap-bubble look: see-through in the middle, a coloured rim (fresnel), a rainbow sheen
  * that slides around, and a bright highlight. Works on any background without transmission.
  */
-export function bubbleMaterial(color: THREE.ColorRepresentation, tint: THREE.ColorRepresentation, opacity = 0.62): THREE.ShaderMaterial {
+const PATTERNS: Record<PatternKind, number> = { none: 0, stripes: 1, spots: 2, swirl: 3, checks: 4, zigzag: 5, sparkle: 6, bands: 7 };
+
+export function bubbleMaterial(
+  color: THREE.ColorRepresentation,
+  tint: THREE.ColorRepresentation,
+  opacity = 0.62,
+  pattern: PatternKind = 'none',
+  patColor: THREE.ColorRepresentation = '#ffffff',
+): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -27,6 +35,8 @@ export function bubbleMaterial(color: THREE.ColorRepresentation, tint: THREE.Col
       uTint: { value: new THREE.Color(tint) },
       uTime: { value: 0 },
       uOpacity: { value: opacity },
+      uPattern: { value: PATTERNS[pattern] },
+      uPat: { value: new THREE.Color(patColor) },
     },
     vertexShader: `
       varying vec3 vN; varying vec3 vV; varying vec3 vP; varying vec3 vTint;
@@ -49,7 +59,23 @@ export function bubbleMaterial(color: THREE.ColorRepresentation, tint: THREE.Col
       }`,
     fragmentShader: `
       uniform vec3 uColor; uniform vec3 uTint; uniform float uTime; uniform float uOpacity;
+      uniform int uPattern; uniform vec3 uPat;
       varying vec3 vN; varying vec3 vV; varying vec3 vP; varying vec3 vTint;
+      float patternMask(vec3 p) {
+        float ang = atan(p.z, p.x);
+        if (uPattern == 1) return smoothstep(0.32, 0.4, abs(fract(p.y * 2.6) - 0.5));
+        if (uPattern == 2) return 1.0 - smoothstep(0.17, 0.21, length(fract(p * 2.2) - 0.5));
+        if (uPattern == 3) return smoothstep(0.55, 0.7, sin(ang * 3.0 + p.y * 6.0 + uTime * 0.8));
+        if (uPattern == 4) return step(0.0, sin(p.x * 6.0) * sin(p.y * 6.0) * sin(p.z * 6.0));
+        if (uPattern == 5) return smoothstep(0.34, 0.42, abs(fract(p.y * 2.5 + abs(fract(ang * 1.27) - 0.5) * 1.4) - 0.5));
+        if (uPattern == 6) {
+          vec3 c = floor(p * 5.0);
+          float tw = 0.5 + 0.5 * sin(uTime * 3.0 + dot(c, vec3(1.0, 7.0, 13.0)));
+          return (1.0 - smoothstep(0.07, 0.12, length(fract(p * 5.0) - 0.5))) * tw;
+        }
+        if (uPattern == 7) return smoothstep(0.3, 0.38, abs(fract(ang / 6.2832 * 8.0) - 0.5));
+        return 0.0;
+      }
       vec3 hue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
       void main() {
         vec3 n = normalize(vN);
@@ -65,6 +91,9 @@ export function bubbleMaterial(color: THREE.ColorRepresentation, tint: THREE.Col
         float top = smoothstep(0.2, 1.0, n.y) * 0.25;
         col += vec3(1.0) * (spec * 0.9 + top);
         float a = clamp(0.3 + rim * 0.9 + spec, 0.0, 1.0) * uOpacity + 0.2;
+        float pm = patternMask(vP) * 0.85;
+        col = mix(col, uPat + spec * 0.6, pm);
+        a = max(a, pm * (uOpacity * 0.9 + 0.1));
         gl_FragColor = vec4(min(col, vec3(1.0)), min(a, 1.0));
       }`,
   });
@@ -78,6 +107,15 @@ export class Bubble {
   private readonly mat: THREE.ShaderMaterial;
   private readonly core: THREE.Mesh;
   private readonly eyes: THREE.Group[] = [];
+  private readonly pupils: THREE.Mesh[] = [];
+  private smile!: THREE.Mesh;
+  private oh!: THREE.Mesh;
+  /** Popped (trail cut): hidden until it re-forms at the nest. */
+  popped = false;
+  private reform = 1;
+  /** Big Bubble power: grows and shoves others. */
+  big = false;
+  private bigScale = 1;
   private readonly stars = new THREE.Group();
   private readonly crown: THREE.Mesh;
   private readonly shield: THREE.Mesh;
@@ -96,10 +134,13 @@ export class Bubble {
   ghostColor: string | null = null;
   lean = 0;
 
+  /** Extra scale set from outside (the boss is a big bubble). */
+  baseScale = 1;
+
   constructor(id: number, isHuman: boolean, skin: Skin = SKINS[0]) {
     const color = PLAYER_COLORS[id];
     const tint = skin.body ?? new THREE.Color(color).lerp(new THREE.Color('#ffffff'), 0.6).getStyle();
-    this.mat = bubbleMaterial(color, tint, 0.75);
+    this.mat = bubbleMaterial(color, tint, 0.75, skin.pattern, skin.deck);
 
     // a soft coloured core so the team colour reads clearly from above
     this.core = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false }));
@@ -124,6 +165,7 @@ export class Bubble {
       shine.scale.setScalar(0.02);
       shine.position.set(0.02, 0.03, 0.065);
       eye.add(w, pupil, shine);
+      this.pupils.push(pupil);
       eye.position.set(side * 0.15, 0.08, R * 0.9);
       this.eyes.push(eye);
       this.face.add(eye);
@@ -135,7 +177,12 @@ export class Bubble {
     const smile = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.014, 6, 16, Math.PI), black);
     smile.rotation.z = Math.PI;
     smile.position.set(0, -0.04, R * 0.95);
-    this.face.add(smile);
+    this.smile = smile;
+    // a little round "oh!" mouth for scary moments
+    this.oh = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.014, 6, 16), black);
+    this.oh.position.set(0, -0.06, R * 0.95);
+    this.oh.visible = false;
+    this.face.add(smile, this.oh);
     this.face.renderOrder = 4;
     this.body.add(this.face);
 
@@ -200,6 +247,23 @@ export class Bubble {
   }
 
   update(dt: number, time: number): void {
+    // Popped: gone until it re-forms (grows back with a jelly overshoot).
+    if (this.popped) {
+      this.reform = 0;
+      this.body.visible = false;
+      this.shadow.visible = false;
+      this.stars.visible = false;
+      return;
+    }
+    if (this.reform < 1) {
+      this.reform = Math.min(1, this.reform + dt / 0.45);
+      this.body.visible = true;
+      this.shadow.visible = true;
+    }
+    const t = this.reform;
+    const grow = t >= 1 ? 1 : 1 - Math.cos(t * Math.PI * 3.5) * Math.exp(-t * 5) * (1 - t);
+    this.bigScale += ((this.big ? 1.6 : 1) - this.bigScale) * Math.min(1, dt * 6);
+    this.root.scale.setScalar(this.baseScale * this.bigScale * Math.max(0.05, grow));
     let dy = this.targetYaw - this.yaw;
     while (dy > Math.PI) dy -= Math.PI * 2;
     while (dy < -Math.PI) dy += Math.PI * 2;
@@ -239,7 +303,19 @@ export class Bubble {
     this.blink -= dt;
     const closed = this.blink < 0.12 || bonked;
     if (this.blink < 0) this.blink = 2 + Math.random() * 3.5;
-    for (const e of this.eyes) e.scale.y = closed ? 0.15 : this.mood === 'happy' ? 0.7 : 1;
+    // Faces: happy squints and grins, scared goes wide-eyed with an "oh!", normal smiles.
+    const scared = this.mood === 'scared';
+    const happyFace = this.mood === 'happy';
+    for (const e of this.eyes) {
+      const s = scared ? 1.25 : 1;
+      e.scale.set(s, closed ? 0.15 : happyFace ? 0.6 : s, 1);
+    }
+    for (const p of this.pupils) p.scale.set(scared ? 0.045 : 0.065, scared ? 0.055 : 0.08, 0.04);
+    this.oh.visible = scared;
+    this.smile.visible = !scared;
+    this.smile.scale.setScalar(happyFace ? 1.6 : 1);
+    if (scared) this.body.position.x = Math.sin(time * 40) * 0.015;
+    else this.body.position.x = 0;
 
     this.stars.visible = bonked;
     if (bonked) {

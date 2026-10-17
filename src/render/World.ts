@@ -2,19 +2,16 @@ import * as THREE from 'three';
 import { CONFIG, PLAYER_COLORS, UNIT } from '../config';
 import type { Game, GameEvent } from '../core/Game';
 import { BallsView } from './BallsView';
-import { Blob } from './Blob';
-import { Bubble, BubbleTrail } from './Bubble';
+import { Bubble, BubbleTrail, bubbleMaterial } from './Bubble';
 import { EggView } from './Egg';
-import { toon } from './materials';
 import { Particles } from './Particles';
 import { Post } from './post';
 import { Scenery, type Art } from './Scenery';
-import { starGeometry } from './shapes';
 import { Territory } from './Territory';
 import { WorldMap } from './WorldMap';
 import { getSkin, type Skin } from '../skins';
 
-type Avatar = Blob | Bubble;
+type Avatar = Bubble;
 const SWOOP_TIME = 2.6;
 export type Quality = 'high' | 'low';
 export type CameraMode = 'follow' | 'overview' | 'orbit';
@@ -51,6 +48,7 @@ export class World {
   private half = 20;
   // Cues for the human player: throw-ready ring and trail danger.
   private readonly readyRing: THREE.Mesh;
+  private readonly halo: THREE.Mesh;
   private humanId: number | null = null;
   /** 0..1: how risky the human's trail is right now (drives the red pulse and heartbeat). */
   danger = 0;
@@ -86,7 +84,8 @@ export class World {
     Object.assign(sc, { left: -14, right: 14, top: 14, bottom: -14, near: 1, far: 60 });
     this.scene.add(this.sun, this.sun.target);
 
-    this.starMesh = new THREE.Mesh(starGeometry(0.42, 0.19, 0.16), toon('#ffd43b', { emissive: '#ffb703', emissiveIntensity: 0.35 }));
+    // The power orb: a golden sparkly bubble in the middle of the island.
+    this.starMesh = new THREE.Mesh(new THREE.SphereGeometry(0.55, 32, 22), bubbleMaterial('#ffd43b', '#fff3a8', 0.9, 'sparkle', '#ffffff'));
     this.starMesh.castShadow = true;
     this.starMesh.visible = false;
     this.readyRing = new THREE.Mesh(
@@ -96,6 +95,14 @@ export class World {
     this.readyRing.rotation.x = -Math.PI / 2;
     this.readyRing.renderOrder = 2;
     this.readyRing.visible = false;
+    this.halo = new THREE.Mesh(
+      new THREE.RingGeometry(0.62, 1.02, 48),
+      new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, depthWrite: false }),
+    );
+    this.halo.rotation.x = -Math.PI / 2;
+    this.halo.renderOrder = 2;
+    this.halo.visible = false;
+    this.scene.add(this.halo);
     this.scene.add(this.matchGroup, this.particles.mesh, this.bubbles.mesh, this.starMesh, this.readyRing);
     this.buildPost();
     this.resize();
@@ -186,6 +193,7 @@ export class World {
 
     this.territory = new Territory(game, game.map.theme);
     this.matchGroup.add(this.territory.mesh);
+    this.buildHazards(game);
     if (this.scenery) this.scene.remove(this.scenery.group);
     this.scenery = new Scenery(game.map, this.art);
     this.scene.add(this.scenery.group);
@@ -197,7 +205,7 @@ export class World {
     for (const p of game.players) {
       const b: Avatar = new Bubble(p.id, p.isHuman, this.skins[p.id]);
       this.avatars.push(b);
-      if (p.id === bossId) b.root.scale.setScalar(1.4); // the boss is a big bubble
+      if (p.id === bossId) b.baseScale = 1.4; // the boss is a big bubble
       const pos = this.gridPos(p.px, p.py);
       this.avatarPos.push(pos.clone());
       b.root.position.copy(pos);
@@ -248,9 +256,14 @@ export class World {
         }
         case 'bonk': {
           this.territory.mark(e.trail);
-          const pos = this.avatarPos[e.victim].clone().setY(0.5);
-          this.particles.burst(pos, PLAYER_COLORS[e.victim], 18, 4);
-          this.particles.puff(pos, 6);
+          const pos = this.avatarPos[e.victim].clone().setY(0.7);
+          // The bubble pops into a shower of little bubbles.
+          for (let k = 0; k < 26; k++) {
+            const a = Math.random() * Math.PI * 2;
+            const at = pos.clone().add(new THREE.Vector3(Math.cos(a) * 0.3, (Math.random() - 0.5) * 0.4, Math.sin(a) * 0.3));
+            this.bubbles.emit(at, new THREE.Vector3(Math.cos(a) * 3, 0, Math.sin(a) * 3), PLAYER_COLORS[e.victim]);
+          }
+          this.particles.burst(pos, PLAYER_COLORS[e.victim], 10, 3);
           const step = Math.max(1, Math.floor(e.trail.length / 14));
           for (let k = 0; k < e.trail.length; k += step) {
             const c = e.trail[k];
@@ -264,9 +277,13 @@ export class World {
         case 'shielded':
           this.particles.burst(this.avatarPos[e.pid].clone().setY(0.6), '#8fe3ff', 16, 3);
           break;
-        case 'respawn':
-          this.particles.puff(this.avatarPos[e.pid].clone().setY(0.3), 8);
+        case 'respawn': {
+          // Re-forms at the nest, gathering a few bubbles.
+          const at = this.gridPos(this.game!.players[e.pid].px, this.game!.players[e.pid].py);
+          this.avatarPos[e.pid].copy(at);
+          for (let k = 0; k < 10; k++) this.bubbles.emit(at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 0.3, (Math.random() - 0.5) * 1.2)), new THREE.Vector3(), PLAYER_COLORS[e.pid]);
           break;
+        }
         case 'coreHit':
           this.eggs[e.owner].loseHeart();
           this.particles.burst(this.nestPos[e.owner].clone().setY(1), '#ff5d8f', 12, 3);
@@ -357,8 +374,18 @@ export class World {
         b.setFacing(Math.cos(p.heading), Math.sin(p.heading));
         const stunned = p.stunTimer > 0;
         b.moving = p.moving && p.status !== 'bonked' && !stunned;
+        b.popped = p.status === 'bonked';
+        b.big = p.power === 'big';
         b.mood =
-          p.status === 'out' ? 'ghost' : p.status === 'bonked' || stunned ? 'bonked' : game.over && game.winner === p.id ? 'happy' : 'normal';
+          p.status === 'out'
+            ? 'ghost'
+            : stunned
+              ? 'bonked'
+              : game.over && game.winner === p.id
+                ? 'happy'
+                : p.id === this.humanId && this.danger > 0.55
+                  ? 'scared'
+                  : 'normal';
         b.ghostColor = p.shadeOf >= 0 ? PLAYER_COLORS[p.shadeOf] : null;
         b.carrying = p.carrying >= 0;
         b.crowned = leader === p.id && p.status !== 'out';
@@ -424,6 +451,7 @@ export class World {
         this.cellPos(game.star.x, game.star.y, this.starMesh.position);
         this.starMesh.position.y += 0.75 + Math.sin(this.time * 3) * 0.12;
         this.starMesh.rotation.y = this.time * 2;
+        (this.starMesh.material as THREE.ShaderMaterial).uniforms.uTime.value = this.time;
         this.starMesh.scale.setScalar(this.starScale);
       }
     }
@@ -452,9 +480,70 @@ export class World {
     this.punch = Math.max(this.punch, amount);
   }
 
+  /** A burst of bubbles fountaining up around the winner. */
+  celebrate(pid: number): void {
+    const at = this.avatarPos[pid];
+    if (!at) return;
+    for (let k = 0; k < 60; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 1.2;
+      this.bubbles.emit(
+        at.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.4 + Math.random() * 0.6, Math.sin(a) * r)),
+        new THREE.Vector3(Math.cos(a) * 2.5, 0, Math.sin(a) * 2.5),
+        PLAYER_COLORS[k % PLAYER_COLORS.length],
+      );
+    }
+    this.kickCamera(1);
+  }
+
+  /** Puddles as shiny pools on the island; wind as drifting streaks. */
+  private puddleMeshes: THREE.Mesh[] = [];
+  private windAcc = 0;
+  private buildHazards(game: Game): void {
+    this.puddleMeshes = [];
+    for (const d of game.puddles) {
+      const m = new THREE.Mesh(
+        new THREE.CircleGeometry(d.r / UNIT, 40),
+        new THREE.MeshBasicMaterial({ color: '#7fd3ff', transparent: true, opacity: 0.45, depthWrite: false }),
+      );
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(d.x / UNIT - this.half, 0.32, d.y / UNIT - this.half);
+      m.renderOrder = 2;
+      const rim = new THREE.Mesh(new THREE.RingGeometry(d.r / UNIT - 0.12, d.r / UNIT, 40), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7, depthWrite: false }));
+      rim.position.z = 0.001;
+      m.add(rim);
+      this.matchGroup.add(m);
+      this.puddleMeshes.push(m);
+    }
+  }
+
+  private updateHazards(game: Game, dt: number): void {
+    this.puddleMeshes.forEach((m, k) => m.scale.setScalar(1 + Math.sin(this.time * 2 + k) * 0.03));
+    if (game.wind.strength <= 0) return;
+    // wind streaks: little white puffs blowing across the island
+    this.windAcc += dt * 14;
+    const wx = Math.cos(game.wind.angle);
+    const wz = Math.sin(game.wind.angle);
+    while (this.windAcc >= 1) {
+      this.windAcc -= 1;
+      const r = game.map.size;
+      const at = new THREE.Vector3((Math.random() - 0.5) * r * 2, 0.5 + Math.random() * 1.5, (Math.random() - 0.5) * r * 2);
+      this.particles.wind(at, new THREE.Vector3(wx * 6, 0, wz * 6));
+    }
+  }
+
   private updateCues(game: Game, dt: number): void {
+    this.updateHazards(game, dt);
     const id = this.humanId;
     const p = id === null ? null : game.players[id];
+    // Your own bubble: a soft glowing ring in your colour, always under you.
+    if (p && p.status === 'alive') {
+      const pos = this.avatarPos[p.id];
+      this.halo.visible = true;
+      this.halo.position.set(pos.x, pos.y + 0.025, pos.z);
+      (this.halo.material as THREE.MeshBasicMaterial).color.set(PLAYER_COLORS[p.id]);
+      this.halo.scale.setScalar((p.power === 'big' ? 1.6 : 1) * (1 + Math.sin(this.time * 3) * 0.04));
+    } else this.halo.visible = false;
     if (!p || !this.territory || p.status !== 'alive' || game.over) {
       this.readyRing.visible = false;
       this.territory?.setDanger(null, 0);

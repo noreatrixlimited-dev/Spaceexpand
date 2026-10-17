@@ -35,6 +35,7 @@
     <section id="title" class="screen map-screen">
       <div class="map-top"><h1 class="logo" id="logo">Nestnappers</h1></div>
       <div id="coinPill" class="coin-pill">0</div>
+      <div id="streakPill" class="streak-pill hidden"></div>
       <div class="card map-bottom">
         <div id="levelTag" class="level-tag">Island 1 of 8</div>
         <h2 id="islandName" class="island-name">Clover Cove</h2>
@@ -44,6 +45,7 @@
         <div class="row tools">
           <button id="customBtn" class="btn">Style</button>
           <button id="missionsBtn" class="btn">Missions <b id="missionsBadge">0/3</b></button>
+          <button id="trophyBtn" class="btn round" aria-label="Trophies"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M7 3h10v2h3v3a4 4 0 0 1-4 4h-.3A5 5 0 0 1 13 14.9V17h3v3H8v-3h3v-2.1A5 5 0 0 1 8.3 12H8a4 4 0 0 1-4-4V5h3zm0 4H6v1a2 2 0 0 0 1 1.7zm11 0h-1v2.7A2 2 0 0 0 18 8z"/></svg></button>
           <button id="howBtn" class="btn round" aria-label="How to play">?</button>
           <button id="settingsBtn" class="btn round" aria-label="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5A3.5 3.5 0 1 1 13 8.5a3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button>
         </div>
@@ -58,6 +60,19 @@
           <div id="missionList" class="missions"></div>
         </div>
         <div id="statsLine" class="stats-line"></div>
+      </div>
+    </section>
+
+    <!-- Trophies: streak, weekly challenge, collection and achievements -->
+    <section id="trophies" class="screen hidden">
+      <div class="card trophies-card">
+        <h2>Trophies</h2>
+        <div id="trophyTop" class="trophy-top"></div>
+        <div class="label">Collection</div>
+        <div id="collection" class="skins"></div>
+        <div class="label">Achievements</div>
+        <div id="achList" class="missions"></div>
+        <button class="btn primary back">Done</button>
       </div>
     </section>
 
@@ -76,11 +91,11 @@
       <div class="card">
         <h2>How to play</h2>
         <div class="steps">
-          <div class="step"><div class="ico ico-paint"></div><div><b>Paint</b>Drag anywhere to carve on your board. Leave your land to draw a trail, then come back home to claim everything inside the loop.</div></div>
-          <div class="step"><div class="ico ico-ball"></div><div><b>Throw</b>Tap (or the ball button) to throw. Splats paint land, cut enemy trails and stun players. More land = more balls!</div></div>
-          <div class="step"><div class="ico ico-bonk"></div><div><b>Careful!</b>If anyone touches your trail, you get bonked and your egg loses a heart.</div></div>
-          <div class="step"><div class="ico ico-egg"></div><div><b>Steal</b>Touch enemy eggs to pop their hearts. With 0 hearts, grab the egg and ride back onto your own colour to keep it. Bump a rider carrying an egg to send it home.</div></div>
-          <div class="step"><div class="ico ico-cloud"></div><div><b>Survive</b>After 1:00 the clouds eat the island's edge. Grab the star for power-ups. If your nest is captured, you're out!</div></div>
+          <div class="step"><div class="ico ico-paint"></div><div><b>Paint</b>Drag anywhere to float your bubble. Leave your land to draw a trail, then come back home to claim everything inside the loop.</div></div>
+          <div class="step"><div class="ico ico-ball"></div><div><b>Throw</b>Tap (or the ball button) to throw. Splats paint land, cut trails and stun other bubbles. More land = more balls!</div></div>
+          <div class="step"><div class="ico ico-bonk"></div><div><b>Careful!</b>If anyone touches your trail, your bubble pops (it re-forms at your nest) and your egg loses a heart.</div></div>
+          <div class="step"><div class="ico ico-egg"></div><div><b>Steal</b>Touch enemy eggs to pop their hearts. With 0 hearts, grab the egg and float back onto your own colour to keep it. Bump a bubble carrying an egg to send it home.</div></div>
+          <div class="step"><div class="ico ico-cloud"></div><div><b>Survive</b>After 1:00 the clouds eat the island's edge. Grab the glowing orb in the middle for a power-up: Speed foam, Bubble shield or Big bubble. Puddles slow you down and wind makes you drift. If your nest is captured, you're out!</div></div>
         </div>
         <p class="controls-hint">Phone: drag to steer, tap to throw. Keyboard: WASD / arrows to steer, Space to throw.</p>
         <p class="controls-hint">Win by being the last nest standing, or own the most land when time runs out.</p>
@@ -93,10 +108,10 @@
       <div class="card">
         <h2>Settings</h2>
         <div class="settings">
-          <label class="toggle"><span>Sound effects</span><input type="checkbox" data-s="sfx" /><i></i></label>
-          <label class="toggle"><span>Vibration</span><input type="checkbox" data-s="vibrate" /><i></i></label>
+          <label class="slider"><span>Bubble sounds</span><input type="range" id="volume" min="0" max="100" step="5" /></label>
+          <div class="seg"><span>Vibration</span><div id="haptics"><button data-h="off">Off</button><button data-h="light">Light</button><button data-h="strong">Strong</button></div></div>
           <label class="toggle"><span>Arrow buttons</span><input type="checkbox" data-s="dpad" /><i></i></label>
-          <label class="toggle"><span>Fancy graphics</span><input type="checkbox" data-s="quality" /><i></i></label>
+          <label class="toggle"><span>Graphics quality <small>(high looks best, low runs faster)</small></span><input type="checkbox" data-s="quality" /><i></i></label>
           <label class="toggle"><span>Hard mode <small>(own trail bonks you)</small></span><input type="checkbox" data-s="hardMode" /><i></i></label>
           <label class="toggle"><span>Chaos start <small>(own a whole quarter)</small></span><input type="checkbox" data-s="startMode" /><i></i></label>
         </div>

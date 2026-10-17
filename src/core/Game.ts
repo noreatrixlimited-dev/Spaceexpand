@@ -5,7 +5,7 @@ import { Grid, type Dir } from './Grid';
 import { Rng } from './rng';
 
 export type PlayerStatus = 'alive' | 'bonked' | 'out';
-export type PowerType = 'speed' | 'shield' | 'freeze';
+export type PowerType = 'speed' | 'shield' | 'big';
 
 export interface Player {
   id: number;
@@ -193,6 +193,27 @@ export class Game {
     const mid = Math.floor(size / 2);
     this.star = { x: mid, y: mid, active: false, timer: CONFIG.starFirst };
     this.grid.countOwned(this.land);
+    if (!opts.tutorial) this.setupHazards();
+  }
+
+  /** Puddles sit away from the nests and the middle; wind starts in a random direction. */
+  private setupHazards(): void {
+    const g = this.grid;
+    if (this.map.hazard === 'wind') {
+      this.wind = { angle: this.rng.next() * Math.PI * 2, strength: CONFIG.windSpeed };
+      return;
+    }
+    if (this.map.hazard !== 'puddles') return;
+    const r = 2.2 * UNIT;
+    for (let tries = 0; tries < 400 && this.puddles.length < 5; tries++) {
+      const x = 4 + this.rng.next() * (g.size - 8);
+      const y = 4 + this.rng.next() * (g.size - 8);
+      if (g.ring(Math.floor(x), Math.floor(y)) < 4) continue; // keep off the coast (rings are one unit deep)
+      if (this.cores.some((c) => Math.hypot(c.x - x, c.y - y) < CONFIG.startRadius + r + UNIT)) continue;
+      if (Math.hypot(this.star.x - x, this.star.y - y) < r + 2 * UNIT) continue;
+      if (this.puddles.some((d) => Math.hypot(d.x - x, d.y - y) < r * 2.4)) continue;
+      this.puddles.push({ x, y, r });
+    }
   }
 
   private claimStart(id: number): void {
@@ -232,6 +253,7 @@ export class Game {
   tick(dt: number): void {
     if (this.over) return;
     this.time += dt;
+    if (this.wind.strength > 0) this.wind.angle += dt * 0.12; // the wind slowly swings round
 
     for (const p of this.players) this.updatePlayer(p, dt);
     this.checkContacts();
@@ -251,8 +273,19 @@ export class Game {
     if (!this.opts.tutorial) this.checkWin();
   }
 
+  /** Puddles (slow zones) on puddle islands, in grid cells. */
+  puddles: { x: number; y: number; r: number }[] = [];
+  /** Wind on windy islands: drift direction (radians) and strength (0 = calm). */
+  wind = { angle: 0, strength: 0 };
+
+  inPuddle(px: number, py: number): boolean {
+    for (const d of this.puddles) if (Math.hypot(px - d.x, py - d.y) < d.r) return true;
+    return false;
+  }
+
   speedOf(p: Player): number {
     let s = CONFIG.baseSpeed * p.speedMul;
+    if (this.puddles.length && this.inPuddle(p.px, p.py)) s *= CONFIG.puddleSlow;
     if (p.carrying >= 0) s *= CONFIG.carrySpeedMul;
     if (p.power === 'speed') s *= CONFIG.boostSpeedMul;
     return s;
@@ -303,6 +336,11 @@ export class Game {
       dist -= step;
       if (!this.moveBy(p, Math.cos(p.heading) * step, Math.sin(p.heading) * step, true)) break;
       if (p.status !== 'alive') break;
+    }
+    // Windy islands: bubbles drift a little while they float around.
+    if (this.wind.strength > 0 && p.status === 'alive') {
+      const w = this.wind.strength * dt;
+      this.moveBy(p, Math.cos(this.wind.angle) * w, Math.sin(this.wind.angle) * w, false);
     }
   }
 
@@ -391,7 +429,29 @@ export class Game {
       if (p.status === 'bonked' || p.status === 'out') continue;
       for (let j = i + 1; j < ps.length; j++) {
         const q = ps[j];
-        if (q.status === 'bonked' || q.status === 'out' || Math.hypot(p.px - q.px, p.py - q.py) > CONFIG.bumpDistance) continue;
+        const big = p.power === 'big' || q.power === 'big';
+        const reach = CONFIG.bumpDistance * (big ? CONFIG.bigReach : 1);
+        if (q.status === 'bonked' || q.status === 'out' || Math.hypot(p.px - q.px, p.py - q.py) > reach) continue;
+        // A Big Bubble shoves smaller bubbles away and stuns them.
+        for (const [a, b] of [
+          [p, q],
+          [q, p],
+        ]) {
+          if (a.power !== 'big' || b.power === 'big' || b.status !== 'alive' || b.stunTimer > 0 || this.isAlly(a.id, b.id)) continue;
+          if (b.shield) {
+            b.shield = false;
+            b.power = null;
+            b.powerTimer = 0;
+            this.events.push({ type: 'shielded', pid: b.id });
+            continue;
+          }
+          if (b.carrying >= 0) this.dropEgg(b, a.id);
+          this.knockback(b, a.px, a.py);
+          if (b.status !== 'alive') continue;
+          b.stunTimer = CONFIG.stunSeconds;
+          this.events.push({ type: 'stun', pid: b.id, by: a.id });
+        }
+        if (Math.hypot(p.px - q.px, p.py - q.py) > CONFIG.bumpDistance) continue;
         // Bumping into an egg carrier knocks the egg back to its nest.
         for (const [a, b] of [
           [p, q],
@@ -556,14 +616,10 @@ export class Game {
   private grantPower(p: Player): void {
     this.star.active = false;
     this.star.timer = CONFIG.starInterval;
-    const power = this.rng.pick(['speed', 'shield', 'freeze'] as const);
-    if (power === 'freeze') {
-      this.voidFrozen = CONFIG.powerSeconds.freeze;
-    } else {
-      p.power = power;
-      p.powerTimer = CONFIG.powerSeconds[power];
-      p.shield = power === 'shield';
-    }
+    const power = this.rng.pick(['speed', 'shield', 'big'] as const);
+    p.power = power;
+    p.powerTimer = CONFIG.powerSeconds[power];
+    p.shield = power === 'shield';
     this.events.push({ type: 'power', pid: p.id, power });
   }
 

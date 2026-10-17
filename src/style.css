@@ -1640,3 +1640,147 @@ button:active {
   background: radial-gradient(circle at 35% 30%, #fffbe0, #ffe27a 45%, #e8b400);
   box-shadow: 0 0 10px #ffd43b;
 }
+
+/* ---------- settings: slider and segmented control ---------- */
+.settings .slider,
+.settings .seg {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 2px;
+  font-weight: 600;
+}
+.settings .slider input[type='range'] {
+  flex: 1;
+  max-width: 55%;
+  accent-color: var(--pink);
+}
+.settings .seg > div {
+  display: flex;
+  background: rgba(74, 54, 84, 0.08);
+  border-radius: 999px;
+  padding: 3px;
+}
+.settings .seg button {
+  font: inherit;
+  font-size: 13px;
+  border: none;
+  background: none;
+  color: var(--ink-soft);
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.settings .seg button.on {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 2px 0 rgba(74, 54, 84, 0.12);
+}
+
+/* ---------- trophies ---------- */
+.streak-pill {
+  position: absolute;
+  top: calc(12px + var(--safe-top));
+  left: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  padding: 5px 12px 5px 28px;
+  font-weight: 700;
+  color: #e8590c;
+  box-shadow: 0 4px 0 rgba(74, 54, 84, 0.12);
+  pointer-events: none;
+}
+.streak-pill::before {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  width: 14px;
+  height: 18px;
+  margin-top: -10px;
+  background: linear-gradient(180deg, #ffd43b, #ff6b1a);
+  border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+  clip-path: polygon(50% 0, 80% 35%, 100% 70%, 80% 100%, 20% 100%, 0 70%, 25% 40%);
+}
+.trophies-card {
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+.trophies-card .label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 14px 0 6px;
+}
+.trophy-top {
+  display: grid;
+  grid-template-columns: 1fr 2.4fr;
+  gap: 8px;
+}
+.trophy-box {
+  background: #fff;
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: 0 2px 0 rgba(74, 54, 84, 0.1);
+  text-align: center;
+}
+.trophy-box b {
+  display: block;
+  font-size: 30px;
+  color: #e8590c;
+  line-height: 1;
+}
+.trophy-box small {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.trophy-box em {
+  display: block;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+  color: #b07a00;
+  margin-top: 4px;
+}
+.trophy-box.wide {
+  text-align: left;
+}
+.trophy-box .m-text {
+  font-weight: 600;
+  font-size: 13px;
+  margin: 2px 0 4px;
+}
+.trophy-box .m-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #eee6f0;
+  overflow: hidden;
+}
+.trophy-box .m-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ffb703, #ff8fb1);
+}
+.trophy-box.done em {
+  color: #2f9e6f;
+}
+.collect-count {
+  grid-column: 1 / -1;
+  font-weight: 700;
+  font-size: 14px;
+  text-align: left;
+}
+.mission .m-text small {
+  display: block;
+  font-weight: 500;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+.map-screen .tools .btn.round {
+  min-width: 44px;
+}
