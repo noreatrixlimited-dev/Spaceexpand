@@ -1,4 +1,5 @@
 out/
 *.mp4
+!spell-and-count-720p.mp4
 song16k.wav
 kws.json
