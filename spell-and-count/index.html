@@ -1,0 +1,524 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Spell and Count!</title>
+<style>
+@font-face{font-family:Gaegu;src:url(fonts/Gaegu-Bold.ttf);font-weight:700}
+@font-face{font-family:PatrickHand;src:url(fonts/PatrickHand-Regular.ttf)}
+html,body{margin:0;background:#f4efe3;overflow:hidden}canvas{display:block}
+</style></head><body><canvas id="c"></canvas>
+<script type="module">
+import { clamp, lerp, seg, ss, eio, eo, back, mulberry, hash, vnoise, TAU } from '/core/lib.js';
+
+// ---------- canvas & layers ----------
+const VW = innerWidth, VH = innerHeight;
+const cv = document.getElementById('c'); cv.width = VW; cv.height = VH;
+const g = cv.getContext('2d');
+const mk = () => { const c = document.createElement('canvas'); c.width = VW; c.height = VH; return [c, c.getContext('2d')]; };
+const [waxC, wx] = mk(), [washC, ws] = mk(), [tmpC, tp] = mk();
+
+// ---------- palette: a box of 11 crayons + white ----------
+const C = {
+  line: '#4a2a4f', yellow: '#f6c531', orange: '#f08a2c', red: '#d93a2e', pink: '#ee8aa6', grass: '#5aa43c',
+  leaf: '#8cc14e', sky: '#5fa8d8', violet: '#7a5bb5', brown: '#8a5a34', cream: '#f3dfb4', white: '#fffdf6',
+  paper: '#f4efe3', wash: '#2741b5'
+};
+const RAINBOW = [C.red, C.orange, C.yellow, C.grass, C.sky, C.violet, C.pink];
+
+// ---------- paper tooth (anchored to the page, panning with the camera) ----------
+const TS = 512;
+function makeTooth() {
+  const c = document.createElement('canvas'); c.width = c.height = TS; const x = c.getContext('2d');
+  const im = x.createImageData(TS, TS), r = mulberry(7);
+  const grid = (n) => { const a = new Float32Array((n + 1) * (n + 1)); for (let i = 0; i < a.length; i++) a[i] = r(); return a; };
+  const oct = [[64, grid(64), .5], [16, grid(16), .3], [128, grid(128), .2]];
+  const val = (gx, n, a) => { const s = TS / n; return (x, y) => {
+    const fx = x / s, fy = y / s, i = Math.floor(fx) % n, j = Math.floor(fy) % n, u = fx - Math.floor(fx), v = fy - Math.floor(fy);
+    const i1 = (i + 1) % n, j1 = (j + 1) % n, U = u * u * (3 - 2 * u), V = v * v * (3 - 2 * v), w = n + 1;
+    return lerp(lerp(a[j * w + i], a[j * w + i1], U), lerp(a[j1 * w + i], a[j1 * w + i1], U), V); }; };
+  const fs = oct.map(([n, a, wgt]) => [val(0, n, a), wgt]);
+  const T = new Float32Array(TS * TS);
+  for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) {
+    let v = 0; for (const [f, w] of fs) v += f(x, y) * w;
+    v += .08 * Math.sin(y * 1.7 + 3 * Math.sin(x * .05)) ;   // horizontal fibre
+    T[y * TS + x] = v;
+  }
+  let mn = 1e9, mx = -1e9; for (const v of T) { mn = Math.min(mn, v); mx = Math.max(mx, v); }
+  // wax mask: alpha where the tooth peaks catch the crayon
+  const mask = document.createElement('canvas'); mask.width = mask.height = TS; const mxx = mask.getContext('2d'); const mi = mxx.createImageData(TS, TS);
+  for (let i = 0; i < T.length; i++) {
+    const t = (T[i] - mn) / (mx - mn);
+    const a = clamp((t - .18) / .42); // soft threshold
+    mi.data[i * 4] = mi.data[i * 4 + 1] = mi.data[i * 4 + 2] = 255; mi.data[i * 4 + 3] = Math.round(255 * (.25 + .75 * a));
+    // paper: mottling + emboss lit top-left
+    const e = (T[i] - (T[((i - TS - 1) + T.length) % T.length])) * 60;
+    const l = 1 + (t - .5) * .03 + e * .012;
+    im.data[i * 4] = 244 * l; im.data[i * 4 + 1] = 239 * l; im.data[i * 4 + 2] = 227 * l; im.data[i * 4 + 3] = 255;
+  }
+  x.putImageData(im, 0, 0); mxx.putImageData(mi, 0, 0);
+  return [c, mask];
+}
+const [paperTile, toothMask] = makeTooth();
+const paperPat = g.createPattern(paperTile, 'repeat');
+const maskPat = wx.createPattern(toothMask, 'repeat');
+
+// ---------- camera ----------
+const WORLD = { w: 3840, h: 2160 };
+let CAM = { x: 1920, y: 1080, z: .5 };
+const setCam = (ctx) => ctx.setTransform(CAM.z, 0, 0, CAM.z, VW / 2 - CAM.x * CAM.z, VH / 2 - CAM.y * CAM.z);
+const toScreen = (x, y) => [(x - CAM.x) * CAM.z + VW / 2, (y - CAM.y) * CAM.z + VH / 2];
+const patOffset = (pat) => { const ox = (VW / 2 - CAM.x * CAM.z), oy = (VH / 2 - CAM.y * CAM.z); pat.setTransform(new DOMMatrix([1, 0, 0, 1, ((ox % TS) + TS) % TS, ((oy % TS) + TS) % TS])); };
+
+// ---------- crayon primitives (world units) ----------
+let BOIL = 0, BOILAMP = 1;   // stepped at 12 fps
+const jit = (seed, k, amt) => (hash(seed * 31.7 + k * 7.13 + BOIL * 13.1) - .5) * 2 * amt * BOILAMP;
+// a ribbon line: core + two thin streaks, low-frequency wobble, revealed along its length by p
+function line(ctx, pts, { col = C.line, w = 7, p = 1, seed = 1, boil = 1, alpha = 1 } = {}) {
+  if (p <= 0 || pts.length < 2) return;
+  // cumulative length for reveal
+  let L = [0]; for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const end = L[L.length - 1] * clamp(p);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = col;
+  const pass = (off, lw, a, k) => {
+    ctx.globalAlpha = a * alpha; ctx.lineWidth = lw; ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      if (L[i] > end) { // partial last segment
+        const f = (end - L[i - 1]) / (L[i] - L[i - 1] || 1);
+        const x = lerp(pts[i - 1][0], pts[i][0], f), y = lerp(pts[i - 1][1], pts[i][1], f);
+        ctx.lineTo(x + off, y + off * .6); break;
+      }
+      const wob = 1.6 + w * .12;
+      const x = pts[i][0] + jit(seed + k, i, wob * boil) + off, y = pts[i][1] + jit(seed + k + 50, i, wob * boil) + off * .6;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  };
+  pass(0, w, 1, 0); pass(w * .35, w * .35, .7, 3); pass(-w * .3, w * .3, .6, 5);
+  ctx.globalAlpha = 1;
+}
+// shapes as point lists
+const circlePts = (cx, cy, r, n = 40, ry = r, rot = 0, a0 = 0, a1 = TAU) => { const o = []; for (let i = 0; i <= n; i++) { const a = a0 + (a1 - a0) * i / n; const x = Math.cos(a) * r, y = Math.sin(a) * ry; o.push([cx + x * Math.cos(rot) - y * Math.sin(rot), cy + x * Math.sin(rot) + y * Math.cos(rot)]); } return o; };
+const quad = (a, b, c, n = 16) => { const o = []; for (let i = 0; i <= n; i++) { const t = i / n, u = 1 - t; o.push([u * u * a[0] + 2 * u * t * b[0] + t * t * c[0], u * u * a[1] + 2 * u * t * b[1] + t * t * c[1]]); } return o; };
+const starPts = (cx, cy, r, rot = -Math.PI / 2) => { const o = []; for (let i = 0; i <= 10; i++) { const a = rot + i * Math.PI / 5, rr = i % 2 ? r * .45 : r; o.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]); } return o; };
+const xf = (pts, tx, ty, s = 1, rot = 0, sx = 1) => pts.map(([x, y]) => { x *= s * sx; y *= s; return [tx + x * Math.cos(rot) - y * Math.sin(rot), ty + x * Math.sin(rot) + y * Math.cos(rot)]; });
+const pathOf = (ctx, pts) => { ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); };
+// zig-zag hatching inside a shape, overshooting the outline; p reveals row by row; knock clears what is beneath first
+function fill(ctx, pts, { col, p = 1, seed = 1, gap = 9, ang = -.5, alpha = .9, over = 1.05, knock = false, w } = {}) {
+  if (p <= 0) return;
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const big = pts.map(([x, y]) => [cx + (x - cx) * over, cy + (y - cy) * over]);
+  if (knock) { ctx.save(); ctx.globalCompositeOperation = 'destination-out'; pathOf(ctx, pts); ctx.fill(); ctx.restore(); }
+  ctx.save(); pathOf(ctx, big); ctx.clip();
+  const R = Math.hypot(x1 - x0, y1 - y0) / 2 + 10, ca = Math.cos(ang), sa = Math.sin(ang);
+  const rows = Math.ceil(2 * R / gap), shown = Math.ceil(rows * clamp(p));
+  ctx.strokeStyle = col; ctx.lineCap = 'round'; ctx.lineWidth = w || gap * 1.05; ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  for (let r = 0; r < shown; r++) {
+    const v = -R + r * gap + (hash(seed + r) - .5) * gap * .4;
+    const dir = r % 2 ? 1 : -1;
+    const ax = cx + (-R * dir) * ca - v * sa, ay = cy + (-R * dir) * sa + v * ca;
+    const bx = cx + (R * dir) * ca - v * sa, by = cy + (R * dir) * sa + v * ca;
+    r ? ctx.lineTo(ax, ay) : ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+  }
+  ctx.stroke();
+  // a lighter cross pass on big areas
+  if (R > 120) {
+    ctx.globalAlpha = alpha * .35; ctx.lineWidth = gap * .5; ctx.beginPath();
+    const c2 = Math.cos(ang + 1.2), s2 = Math.sin(ang + 1.2);
+    for (let r = 0; r < Math.ceil(rows * clamp(p)) / 1.6; r++) {
+      const v = -R + r * gap * 1.6;
+      ctx.moveTo(cx - R * c2 - v * s2, cy - R * s2 + v * c2); ctx.lineTo(cx + R * c2 - v * s2, cy + R * s2 + v * c2);
+    }
+    ctx.stroke();
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+}
+// hand-lettered text: each glyph tilted and offset, boiling; written left→right over p
+function letters(ctx, str, x, y, { size = 150, col = C.line, p = 1, seed = 3, font = 'Gaegu', weight = 700, align = 'center', spacing = 1.0, scaleOf = null, behind = null } = {}) {
+  ctx.font = `${weight} ${size}px ${font}`; ctx.textBaseline = 'middle';
+  const ws = [...str].map(ch => ctx.measureText(ch).width * spacing);
+  const tot = ws.reduce((a, b) => a + b, 0);
+  let cx = align === 'center' ? x - tot / 2 : x;
+  const n = str.length;
+  [...str].forEach((ch, i) => {
+    const vis = clamp(p * n - i); if (vis <= 0 || ch === ' ') { cx += ws[i]; return; }
+    const gx = cx + ws[i] / 2, s = scaleOf ? scaleOf(i) : 1;
+    ctx.save(); ctx.translate(gx + jit(seed, i, 2), y + jit(seed + 9, i, 2)); ctx.rotate((hash(seed * 3 + i) - .5) * .12 + jit(seed + 4, i, .015)); ctx.scale(s, s);
+    if (behind) behind(ctx, i, ws[i], size);
+    // write-on: wipe the glyph from left to right
+    if (vis < 1) { ctx.beginPath(); ctx.rect(-ws[i] / 2 - 4, -size, (ws[i] + 8) * vis, size * 2); ctx.clip(); }
+    ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.fillText(ch, 0, 0);
+    ctx.lineWidth = size * .025; ctx.strokeStyle = col; ctx.strokeText(ch, 0, 0);
+    ctx.restore(); cx += ws[i];
+  });
+  return tot;
+}
+// a quick scribble blob (highlight behind a sung letter, confetti)
+function scribble(ctx, cx, cy, rx, ry, col, seed, p = 1, w = 9) {
+  const pts = []; const r = mulberry(seed);
+  for (let i = 0; i < 16; i++) { const a = i * 2.3 + r(); const k = .35 + .65 * r(); pts.push([cx + Math.cos(a) * rx * k, cy + Math.sin(a) * ry * k]); }
+  line(ctx, pts, { col, w, p, seed, alpha: .85 });
+}
+
+// ---------- the page ----------
+const hillA = x => 1330 + 110 * Math.sin(x / 640 + .4) + 40 * Math.sin(x / 230);
+const hillB = x => 1680 + 70 * Math.sin(x / 470 + 1.3) + 25 * Math.sin(x / 170 + 2);
+const hillPts = (f, n = 80) => { const o = []; for (let i = 0; i <= n; i++) { const x = -60 + i * (WORLD.w + 120) / n; o.push([x, f(x)]); } return o; };
+const HA = hillPts(hillA), HB = hillPts(hillB);
+const HAfill = [...HA, [WORLD.w + 60, WORLD.h + 60], [-60, WORLD.h + 60]];
+const HBfill = [...HB, [WORLD.w + 60, WORLD.h + 60], [-60, WORLD.h + 60]];
+
+// where each number lives: anchor of its spelling strip, the camera framing for its verse
+const SPOT = {
+  1: { strip: [520, 720], size: 195, cam: { x: 760, y: 560, z: 1.05 } },
+  2: { strip: [1420, 760], size: 195, cam: { x: 1420, y: 560, z: 1.05 } },
+  3: { strip: [1230, 1130], size: 169, cam: { x: 960, y: 1150, z: .95 } },
+  4: { strip: [1640, 1500], size: 169, cam: { x: 1650, y: 1720, z: .95 } },
+  5: { strip: [2620, 1580], size: 156, cam: { x: 2620, y: 1760, z: 1.0 } },
+  6: { strip: [3420, 820], size: 156, cam: { x: 3300, y: 560, z: 1.0 } },
+  7: { strip: [2650, 1300], size: 156, cam: { x: 2650, y: 1180, z: .78 } },
+  8: { strip: [2600, 500], size: 143, cam: { x: 2620, y: 640, z: .9 } },
+  9: { strip: [1900, 380], size: 156, cam: { x: 1920, y: 560, z: .62 } },
+  10: { strip: [3420, 1130], size: 156, cam: { x: 3300, y: 1550, z: .9 } },
+};
+const NUMW = ['', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE', 'TEN'];
+
+// ---------- timeline ----------
+let TL = null;
+const T = { };   // derived lookups
+function bounce(t, t0, d = .45, amp = .35) { const u = (t - t0) / d; if (u < 0 || u > 1) return 0; return Math.sin(u * Math.PI) * amp * (1 - u * .3); }
+// how much number n's things are alive at t: appear progress of object i, bounce amount
+function objP(n, i, t) { const ts = TL.numbers[n - 1].objects; if (!ts || i >= ts.length) return 0; return seg(t, ts[i], ts[i] + .45); }
+function pulse(n, t, i = -1) {
+  let b = 0;
+  for (const p of T.pulses[n] || []) { if (p > t + .01) break; b = Math.max(b, bounce(t, p, .5, .22)); }
+  // objects also hop once when they appear
+  const ts = TL.numbers[n - 1].objects || []; if (i >= 0 && ts[i] != null) b = Math.max(b, bounce(t, ts[i], .45, .3));
+  return b;
+}
+
+// ---------- characters & things ----------
+function drawSun(ctx, t) {
+  const p = objP(1, 0, t); if (p <= 0) return;
+  const cx = 470, cy = 400, b = pulse(1, t, 0), r = 165 * (1 + b * .4);
+  // rays turn slowly, drawn one by one
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * TAU + t * .15, q = seg(p, i / 14, i / 14 + .3);
+    line(ctx, [[cx + Math.cos(a) * (r + 30), cy + Math.sin(a) * (r + 30)], [cx + Math.cos(a) * (r + 95 + 15 * Math.sin(t * 3 + i)), cy + Math.sin(a) * (r + 95 + 15 * Math.sin(t * 3 + i))]], { col: C.orange, w: 14, p: q, seed: 100 + i });
+  }
+  const body = circlePts(cx, cy, r, 44);
+  fill(ctx, body, { col: C.yellow, p: seg(p, .2, 1), seed: 11, gap: 10, alpha: .95, knock: true });
+  line(ctx, body, { col: C.orange, w: 10, p, seed: 12 });
+  if (p >= 1) face(ctx, cx, cy + 10, r * .9, 13, t, 1);
+}
+function face(ctx, cx, cy, s, seed, t, smile = 1) {
+  const blink = (hash(Math.floor(t / 2.7) + seed) < .3 && (t % 2.7) < .12) ? .15 : 1;
+  for (const dx of [-.28, .28]) {
+    ctx.save(); ctx.fillStyle = C.line; ctx.beginPath(); ctx.ellipse(cx + dx * s, cy - .12 * s, s * .065, s * .08 * blink, 0, 0, TAU); ctx.fill(); ctx.restore();
+    if (blink > .5) { ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(cx + dx * s + s * .02, cy - .15 * s, s * .02, 0, TAU); ctx.fill(); }
+    fill(ctx, circlePts(cx + dx * s * 1.35, cy + .1 * s, s * .1, 14), { col: C.pink, seed: seed + dx * 10, gap: 6, alpha: .7, over: 1 });
+  }
+  line(ctx, circlePts(cx, cy + .05 * s, s * .28, 14, s * .22 * smile, 0, .25, Math.PI - .25), { col: C.line, w: Math.max(5, s * .04), seed: seed + 3 });
+}
+function drawBird(ctx, t, i) {
+  const p = objP(2, i, t); if (p <= 0) return;
+  const [bx, by] = i ? [1590, 470] : [1250, 360];
+  const b = pulse(2, t, i), y = by - b * 80 + Math.sin(t * 2 + i) * 10;
+  const up = Math.floor(t * 107.7 / 60 * 2 + i) % 2;   // wings flap on the eighth notes (substitution)
+  const s = 1 + b * .3, dir = i ? -1 : 1;
+  const body = xf(circlePts(0, 0, 70, 30, 52), bx, y, s);
+  fill(ctx, body, { col: i ? C.violet : C.sky, p, seed: 200 + i, gap: 8, knock: true });
+  line(ctx, body, { p, seed: 201 + i, w: 8 });
+  const wing = up ? [[-20, -10], [-5, -95], [35, -15]] : [[-20, 0], [0, 55], [35, 5]];
+  line(ctx, xf(wing, bx, y, s), { p: seg(p, .5, 1), seed: 202 + i, w: 8 });
+  const beak = xf([[dir * 62, -18], [dir * 108, 0], [dir * 62, 14]], bx, y, s);
+  fill(ctx, beak, { col: C.orange, p: seg(p, .6, 1), seed: 203 + i, gap: 6, over: 1 }); line(ctx, beak, { p: seg(p, .6, 1), seed: 204 + i, w: 6 });
+  if (p >= 1) { ctx.fillStyle = C.line; ctx.beginPath(); ctx.arc(bx + dir * 30 * s, y - 18 * s, 8, 0, TAU); ctx.fill(); }
+  line(ctx, xf([[-70 * dir, 0], [-110 * dir, -22], [-104 * dir, 18], [-70 * dir, 8]], bx, y, s), { p: seg(p, .4, 1), seed: 205 + i, w: 7 });
+}
+const TREE = { x: 640, y: 1500 };
+const APPLES = [[560, 1040], [770, 1080], [650, 1210]];
+function drawTree(ctx, t) {
+  const p = seg(t, T.treeT, T.treeT + 2.2); if (p <= 0) return;
+  const trunk = [[TREE.x - 45, TREE.y], [TREE.x - 30, TREE.y - 320], [TREE.x + 30, TREE.y - 320], [TREE.x + 50, TREE.y]];
+  fill(ctx, trunk, { col: C.brown, p: seg(p, 0, .4), seed: 300, gap: 8, knock: true }); line(ctx, trunk, { p: seg(p, 0, .4), seed: 301, w: 9 });
+  const crown = []; for (let i = 0; i <= 60; i++) { const a = i / 60 * TAU; const r = 270 + 30 * Math.sin(a * 7); crown.push([TREE.x + Math.cos(a) * r * 1.05, TREE.y - 400 + Math.sin(a) * r * .82]); }
+  fill(ctx, crown, { col: C.leaf, p: seg(p, .3, 1), seed: 302, gap: 11, knock: true, alpha: .85 }); line(ctx, crown, { p: seg(p, .2, .8), seed: 303, w: 10 });
+  APPLES.forEach(([ax, ay], i) => {
+    const q = objP(3, i, t); if (q <= 0) return;
+    const drop = (1 - eo(q)) * -140, b = pulse(3, t, i), r = 46 * (1 + b * .5);
+    const ap = circlePts(ax, ay + drop, r, 24);
+    fill(ctx, ap, { col: C.red, seed: 310 + i, gap: 7, knock: true, alpha: .95 }); line(ctx, ap, { seed: 311 + i, w: 8 });
+    line(ctx, [[ax, ay + drop - r], [ax + 8, ay + drop - r - 28]], { col: C.brown, w: 7, seed: 312 + i });
+    fill(ctx, xf(circlePts(0, 0, 20, 12, 9), ax + 26, ay + drop - r - 16, 1, -.5), { col: C.grass, seed: 313 + i, gap: 5, over: 1 });
+  });
+}
+const KCOL = [C.orange, C.cream, C.violet, C.brown];
+function drawKitten(ctx, t, i) {
+  const p = objP(4, i, t); if (p <= 0) return;
+  const kx = 1300 + i * 230, ky = 1790 + (i % 2) * 30, b = pulse(4, t, i), hop = b * 90;
+  const pose = Math.floor(t * 107.7 / 60 + i) % 2;   // a new drawing per beat
+  const s = .95 + (i % 2) * .08, y = ky - hop;
+  const body = xf(circlePts(0, 0, 80, 26, 55), kx, y + 20, s);
+  const head = xf(circlePts(0, 0, 62, 24, 55), kx + 50 * s, y - 60 * s, s);
+  const ears = [xf([[-50, -30], [-40, -100], [-8, -50]], kx + 50 * s, y - 60 * s, s), xf([[8, -50], [40, -100], [50, -30]], kx + 50 * s, y - 60 * s, s)];
+  const tail = xf(pose ? quad([-75, 10], [-150, -40], [-120, -130]) : quad([-75, 10], [-170, 0], [-160, -100]), kx, y + 20, s);
+  line(ctx, tail, { col: KCOL[i], w: 18, p, seed: 400 + i }); line(ctx, tail, { w: 6, p, seed: 401 + i });
+  fill(ctx, body, { col: KCOL[i], p, seed: 402 + i, gap: 8, knock: true }); line(ctx, body, { p, seed: 403 + i, w: 8 });
+  ears.forEach((e, k) => { fill(ctx, e, { col: KCOL[i], p, seed: 404 + i + k, gap: 6, knock: true }); line(ctx, e, { p, seed: 406 + i + k, w: 8 }); });
+  fill(ctx, head, { col: KCOL[i], p, seed: 408 + i, gap: 8, knock: true }); line(ctx, head, { p, seed: 409 + i, w: 8 });
+  // legs: mitten feet
+  for (const dx of [-45, 40]) line(ctx, xf([[dx, 40], [dx + (pose ? 6 : -6), 78]], kx, y + 20, s), { w: 12, p, seed: 410 + dx + i });
+  if (p >= 1) {
+    face(ctx, kx + 50 * s, y - 50 * s, 70 * s, 420 + i, t, .8);
+    for (const sgn of [-1, 1]) for (const k of [-1, 1]) line(ctx, xf([[sgn * 30, 5 + k * 6], [sgn * 75, k * 14]], kx + 50 * s, y - 50 * s, s), { w: 3, seed: 430 + i + k * sgn });
+  }
+}
+const FLW = [C.pink, C.yellow, C.violet, C.red, C.orange];
+function drawFlower(ctx, t, i) {
+  const p = objP(5, i, t); if (p <= 0) return;
+  const fx = 2370 + i * 125, base = 1950 - (i % 2) * 25, b = pulse(5, t, i), sway = Math.sin(t * 2.2 + i) * 10;
+  const h = (190 + (i % 3) * 25) * eo(p), top = [fx + sway, base - h - b * 60];
+  line(ctx, [[fx, base], [fx + sway * .5, base - h * .5], top], { col: C.grass, w: 9, seed: 500 + i });
+  fill(ctx, xf(circlePts(0, 0, 32, 12, 13), fx + 25, base - h * .45, 1, -.5), { col: C.leaf, seed: 501 + i, gap: 5, over: 1 });
+  if (p < .5) return;
+  const q = seg(p, .5, 1), R = 52 * (1 + b * .4);
+  for (let k = 0; k < 5; k++) {
+    const a = k / 5 * TAU + i, pet = circlePts(top[0] + Math.cos(a) * R * .62, top[1] + Math.sin(a) * R * .62, R * .42 * q, 14);
+    fill(ctx, pet, { col: FLW[i], seed: 510 + i * 7 + k, gap: 6, knock: true, over: 1.08 }); line(ctx, pet, { seed: 520 + i * 7 + k, w: 6 });
+  }
+  const c = circlePts(top[0], top[1], R * .3 * q, 12);
+  fill(ctx, c, { col: i === 1 ? C.orange : C.yellow, seed: 530 + i, gap: 5, knock: true }); line(ctx, c, { seed: 531 + i, w: 6 });
+}
+const BAL = [[3060, 330], [3230, 230], [3390, 360], [3560, 240], [3700, 380], [3300, 480]];
+const BCOL = [C.red, C.sky, C.yellow, C.grass, C.violet, C.pink];
+function drawBalloon(ctx, t, i) {
+  const p = objP(6, i, t); if (p <= 0) return;
+  const [bx, by0] = BAL[i], b = pulse(6, t, i), by = by0 + (1 - eo(p)) * 300 - b * 60 + Math.sin(t * 1.3 + i * 2) * 14;
+  const r = 66 * (1 + b * .25);
+  line(ctx, quad([bx, by + r * 1.2], [bx + 30 * Math.sin(t + i), by + 200], [3380, 760]), { w: 4, seed: 600 + i });
+  const bl = circlePts(bx, by, r, 26, r * 1.2);
+  fill(ctx, bl, { col: BCOL[i], seed: 601 + i, gap: 8, knock: true }); line(ctx, bl, { seed: 602 + i, w: 8 });
+  line(ctx, circlePts(bx - r * .35, by - r * .45, r * .25, 8, r * .35, 0, 3.3, 4.6), { col: C.white, w: 9, seed: 603 + i });
+}
+const RB = { x: 2650, y: 1520, r0: 470, dr: 36 };
+function drawRainbow(ctx, t) {
+  for (let i = 0; i < 7; i++) {
+    const p = objP(7, i, t); if (p <= 0) continue;
+    const r = RB.r0 + (6 - i) * RB.dr, b = pulse(7, t, i);
+    line(ctx, circlePts(RB.x, RB.y, r + b * 20, 50, r + b * 20, 0, Math.PI, TAU), { col: RAINBOW[i], w: RB.dr * 1.05, p: eo(p), seed: 700 + i, boil: .4, alpha: .9 });
+  }
+}
+const BUT = [[2280, 760], [2420, 680], [2560, 760], [2700, 690], [2840, 770], [2980, 690], [3110, 780], [2640, 840]];
+function drawButterfly(ctx, t, i) {
+  const p = objP(8, i, t); if (p <= 0) return;
+  const [x0, y0] = BUT[i], b = pulse(8, t, i);
+  const x = x0 + Math.sin(t * .9 + i) * 30, y = y0 + Math.cos(t * 1.1 + i * 2) * 20 - b * 50;
+  const open = Math.floor(t * 107.7 / 60 * 2 + i) % 2 ? 1 : .35, s = (1.15 + (i % 3) * .12) * (1 + b * .3) * eo(p);
+  const cA = RAINBOW[(i * 3) % 7], cB = RAINBOW[(i * 3 + 2) % 7];
+  for (const sg of [-1, 1]) {
+    const up = xf(circlePts(0, 0, 40, 16, 32), x + sg * 36 * s * open, y - 22 * s, s, sg * .4, open);
+    const lo = xf(circlePts(0, 0, 26, 14, 22), x + sg * 26 * s * open, y + 24 * s, s, -sg * .3, open);
+    fill(ctx, up, { col: cA, seed: 800 + i * 4 + sg, gap: 6, knock: true }); line(ctx, up, { seed: 810 + i * 4 + sg, w: 5 });
+    fill(ctx, lo, { col: cB, seed: 820 + i * 4 + sg, gap: 6, knock: true }); line(ctx, lo, { seed: 830 + i * 4 + sg, w: 5 });
+  }
+  line(ctx, [[x, y - 40 * s], [x, y + 40 * s]], { w: 9, seed: 840 + i });
+}
+const STARS = [[880, 170], [1080, 640], [1300, 150], [1700, 170], [2150, 130], [2400, 260], [2950, 130], [240, 980], [2050, 690]];
+function drawStars(ctx, t) {
+  // white wax, on the page from the start (invisible on paper; the night wash finds them)
+  const p = seg(t, T.starsT, T.starsT + 3);
+  STARS.forEach(([x, y], i) => {
+    const b = pulse(9, t, i), q = objP(9, i, t);
+    const s = starPts(x, y, 62 * (1 + b * .5 + q * .15), -Math.PI / 2 + i * .2);
+    const nv = seg(t, T.nightT0, T.nightT0 + 1.5), wa = .35 + .65 * nv;   // white wax: faint on paper, bright once the wash finds it
+    fill(ctx, s, { col: C.white, p, seed: 900 + i, gap: 6, alpha: wa, over: 1.02 });
+    line(ctx, s, { col: C.white, w: 9, p, seed: 910 + i, boil: .5, alpha: wa });
+    if (q > 0) { // a counted star gets a yellow heart and twinkles
+      fill(ctx, starPts(x, y, 30, -Math.PI / 2 + i * .2), { col: C.yellow, p: q, seed: 920 + i, gap: 5, over: 1 });
+      const tw = .5 + .5 * Math.sin(t * 9 + i * 2);
+      line(ctx, [[x - 95 - tw * 15, y], [x - 75, y]], { col: C.yellow, w: 6, p: q, seed: 930 + i });
+      line(ctx, [[x + 75, y], [x + 95 + tw * 15, y]], { col: C.yellow, w: 6, p: q, seed: 931 + i });
+    }
+  });
+}
+const HOUSE = { x: 3180, y: 1480, w: 380, h: 420 };
+const WINDOWS = (() => { const o = []; const { x, y } = HOUSE;
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) if (!(r === 1 && c === 1)) o.push([[x + 50 + c * 115, y + 60 + r * 150], 'front']);
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) o.push([[x + HOUSE.w + 45 + c * 85, y + 40 + r * 150 - c * 22], 'side']);
+  o.push([[x + 165, y + 200], 'door']); return o; })();
+function drawHouse(ctx, t) {
+  const p = seg(t, T.houseT, T.houseT + 2.4); if (p <= 0) return;
+  const { x, y, w, h } = HOUSE;
+  const front = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  const gable = [[x - 30, y], [x + w / 2, y - 210], [x + w + 30, y]];
+  const side = [[x + w, y], [x + w + 210, y - 60], [x + w + 210, y + h - 60], [x + w, y + h]];
+  const roof = [[x + w / 2, y - 210], [x + w + 230, y - 270], [x + w + 250, y - 60], [x + w + 30, y]];
+  fill(ctx, side, { col: C.pink, p: seg(p, .2, .7), seed: 1000, gap: 9, knock: true }); line(ctx, side, { p: seg(p, .1, .5), seed: 1001, w: 9 });
+  fill(ctx, front, { col: C.cream, p: seg(p, .1, .6), seed: 1002, gap: 9, knock: true }); line(ctx, front, { p: seg(p, 0, .4), seed: 1003, w: 10 });
+  fill(ctx, roof, { col: C.red, p: seg(p, .4, .9), seed: 1004, gap: 9, knock: true }); line(ctx, roof, { p: seg(p, .3, .7), seed: 1005, w: 10 });
+  fill(ctx, gable, { col: C.red, p: seg(p, .4, .9), seed: 1006, gap: 9, knock: true }); line(ctx, gable, { p: seg(p, .3, .7), seed: 1007, w: 10 });
+  WINDOWS.forEach(([[wx0, wy0], kind], i) => {
+    const ww = kind === 'door' ? 60 : kind === 'side' ? 55 : 72, hh = kind === 'door' ? 110 : 75;
+    const sk = kind === 'side' ? -.28 : 0;
+    const box = kind === 'door' ? [[wx0 - 10, wy0 + 30], [wx0 + 80, wy0 + 30], [wx0 + 80, y + h], [wx0 - 10, y + h]]
+      : [[wx0, wy0], [wx0 + ww, wy0 + ww * sk], [wx0 + ww, wy0 + ww * sk + hh], [wx0, wy0 + hh]];
+    const lit = i < 10 ? objP(10, i, t) : 0, b = i < 10 ? pulse(10, t, i) : 0;
+    fill(ctx, box, { col: lit > 0 ? C.yellow : C.white, p: kind === 'door' ? 1 : Math.max(seg(p, .6, 1), lit), seed: 1010 + i, gap: 6, knock: true, alpha: 1, over: 1 + b * .2 });
+    line(ctx, box, { p: seg(p, .5, 1), seed: 1030 + i, w: 7 });
+    if (kind !== 'door') { const mx = wx0 + ww / 2; line(ctx, [[mx, wy0 + ww * sk / 2], [mx, wy0 + hh + ww * sk / 2]], { p: seg(p, .6, 1), seed: 1050 + i, w: 5 }); }
+  });
+}
+// the spelling strip: letters lettered on their first sung appearance, circled and bounced when sung again; the numeral after the word
+function drawStrip(ctx, t, n) {
+  const N = TL.numbers[n - 1], S = SPOT[n]; if (!N || t < N.letters[0]) return;
+  const word = NUMW[n], [sx, sy] = S.strip, size = S.size;
+  const first = N.letters;                       // first-appearance time per letter index
+  const p = (() => { let k = 0; for (let i = 0; i < word.length; i++) if (t >= first[i]) k = i + seg(t, first[i], first[i] + .35); return k / word.length; })();
+  // active letter: the most recent sung instance (holds .45 s)
+  let act = -1; for (const s of N.sung) { if (s.t > t) break; if (t - s.t < .45) act = s.i; }
+  const scaleOf = i => 1 + (i === act ? bounce(t, N.sung.filter(s => s.i === i && s.t <= t).slice(-1)[0]?.t ?? -9, .45, .3) : 0);
+  const behind = (c, i, w, sz) => { if (i === act) scribble(c, 0, 0, w * .62, sz * .42, C.yellow, 7000 + i * 13 + Math.floor(t * 12), 1, sz * .12); };
+  letters(ctx, word, sx, sy, { size, p, seed: 50 + n, scaleOf, behind, spacing: 1.08 });
+  // numeral, after the first sung word: big, coloured, circled
+  const wt = N.words[0]; if (wt == null || t < wt) return;
+  ctx.font = `700 ${size}px Gaegu`; const half = ctx.measureText(word).width * 1.08 / 2;
+  const nx = sx + half + size * .85, ny = sy - size * .05, wb = Math.max(...N.words.map(w => bounce(t, w, .5, .35))) + pulse(n, t) * .8;
+  const ring = circlePts(nx, ny, size * .62 * (1 + wb), 30);
+  fill(ctx, ring, { col: RAINBOW[(n - 1) % 7], p: seg(t, wt, wt + .5), seed: 60 + n, gap: 8, alpha: .55, knock: true });
+  line(ctx, ring, { p: seg(t, wt, wt + .4), seed: 61 + n, w: 8 });
+  letters(ctx, String(n), nx, ny + size * .04, { size: size * 1.15 * (1 + wb), p: seg(t, wt, wt + .3), seed: 70 + n, font: 'PatrickHand', weight: 400 });
+}
+
+// ---------- printed words (screen space, bottom centre, on a ragged paper patch) ----------
+function printed(t) {
+  for (const s of TL.subs) {
+    if (t < s.t0 || t > s.t1) continue;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.font = '54px PatrickHand'; const w = g.measureText(s.text).width;
+    const cx = VW / 2, cy = VH - 92, pw = w + 90, ph = 96, q = seg(t, s.t0, s.t0 + .35);
+    // ragged knock-out patch of blank paper
+    g.save(); g.beginPath();
+    for (let i = 0; i <= 40; i++) { const a = i / 40 * TAU; const rr = 1 + (hash(i * 3.1 + s.t0) - .5) * .08; g.lineTo(cx + Math.cos(a) * pw / 2 * rr, cy + Math.sin(a) * ph / 2 * rr); }
+    g.closePath(); g.fillStyle = paperPat; patOffset(paperPat); g.fill(); g.restore();
+    letters(g, s.text, cx, cy, { size: 54, font: 'PatrickHand', weight: 400, p: q * (s.text.length > 0 ? 1 : 0), seed: Math.floor(s.t0 * 10), spacing: 1 });
+  }
+}
+
+// ---------- intro & outro: the crayon that starts it, confetti at the end ----------
+function drawCrayon(ctx, x, y, col, rot) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(40, -22); ctx.lineTo(40, 22); ctx.closePath(); ctx.fill();
+  ctx.fillRect(40, -24, 300, 48); ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(40, -24, 300, 12);
+  ctx.fillStyle = '#e9d9b0'; ctx.fillRect(110, -26, 170, 52); ctx.fillStyle = col; ctx.fillRect(110, -8, 170, 4); ctx.fillRect(110, 6, 170, 4);
+  ctx.restore();
+}
+
+// ---------- frame ----------
+window.DUR = 206.8;
+window.render = (t) => {
+  BOIL = Math.floor(t * 12);
+  BOILAMP = t > T.nightT0 && t < T.nightT0 + 6 ? .5 : 1;
+  CAM = camAt(t);
+  // paper
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+  patOffset(paperPat); g.fillStyle = paperPat; g.fillRect(0, 0, VW, VH);
+  // wax layer
+  wx.setTransform(1, 0, 0, 1, 0, 0); wx.clearRect(0, 0, VW, VH); setCam(wx);
+  const hp = seg(t, T.hillT0, T.hillT1);
+  fill(wx, HAfill, { col: C.leaf, p: seg(hp, .35, 1), seed: 1, gap: 14, alpha: .55, ang: -.15 });
+  line(wx, HA, { col: C.grass, w: 12, p: seg(hp, 0, .5), seed: 2, boil: .6 });
+  fill(wx, HBfill, { col: C.grass, p: seg(hp, .5, 1), seed: 3, gap: 14, alpha: .7, ang: -.1, knock: true });
+  line(wx, HB, { col: C.grass, w: 12, p: seg(hp, .2, .7), seed: 4, boil: .6 });
+  drawStars(wx, t);
+  drawRainbow(wx, t);
+  drawSun(wx, t); drawBird(wx, t, 0); drawBird(wx, t, 1);
+  drawTree(wx, t);
+  for (let i = 0; i < 6; i++) drawBalloon(wx, t, i);
+  drawHouse(wx, t);
+  for (let i = 0; i < 5; i++) drawFlower(wx, t, i);
+  for (let i = 0; i < 4; i++) drawKitten(wx, t, i);
+  for (let i = 0; i < 8; i++) drawButterfly(wx, t, i);
+  for (let n = 1; n <= 10; n++) drawStrip(wx, t, n);
+  drawOutroWords(wx, t);
+  // wax sticks only to the tooth
+  wx.setTransform(1, 0, 0, 1, 0, 0); wx.globalCompositeOperation = 'destination-in'; patOffset(maskPat); wx.fillStyle = maskPat; wx.fillRect(0, 0, VW, VH); wx.globalCompositeOperation = 'source-over';
+  // night: an ultramarine wash, resisted by the wax
+  const nightP = seg(t, T.nightT0, T.nightT1);
+  if (nightP > 0) {
+    ws.setTransform(1, 0, 0, 1, 0, 0); ws.clearRect(0, 0, VW, VH); setCam(ws);
+    const edge = lerp(-300, WORLD.w + 2600, eio(nightP));
+    ws.fillStyle = C.wash; ws.globalAlpha = .66; ws.beginPath(); ws.moveTo(-400, -400);
+    for (let y = -400; y <= WORLD.h + 400; y += 40) ws.lineTo(edge + 60 * Math.sin(y / 170) + 25 * Math.sin(y / 37), y);
+    ws.lineTo(-400, WORLD.h + 400); ws.closePath(); ws.fill();
+    // darker wet leading edge while it moves; pigment pools along it
+    if (nightP < 1) { ws.globalAlpha = .35; ws.lineWidth = 50; ws.strokeStyle = C.wash; ws.beginPath(); for (let y = -400; y <= WORLD.h + 400; y += 40) { const x = edge + 60 * Math.sin(y / 170) + 25 * Math.sin(y / 37) - 20; y === -400 ? ws.moveTo(x, y) : ws.lineTo(x, y); } ws.stroke(); }
+    ws.globalAlpha = 1; ws.setTransform(1, 0, 0, 1, 0, 0);
+    ws.globalCompositeOperation = 'destination-out'; ws.globalAlpha = .9; ws.drawImage(waxC, 0, 0); ws.globalAlpha = 1; ws.globalCompositeOperation = 'source-over';
+    g.globalCompositeOperation = 'multiply'; g.drawImage(washC, 0, 0); g.globalCompositeOperation = 'source-over';
+  }
+  g.drawImage(waxC, 0, 0);
+  // the crayon that draws the first line (intro)
+  if (t < T.hillT1 + .3) {
+    const hpp = seg(hp, 0, .5); const x = -60 + hpp * (WORLD.w + 120); const [sx, sy] = toScreen(x, hillA(x));
+    drawCrayon(g, sx + jit(1, 0, 2), sy + jit(2, 0, 2), C.grass, -.75);
+  }
+  confetti(t);
+  printed(t);
+  // warm vignette
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  const vg = g.createRadialGradient(VW / 2, VH / 2, VH * .45, VW / 2, VH / 2, VH * 1.05);
+  vg.addColorStop(0, 'rgba(120,80,40,0)'); vg.addColorStop(1, 'rgba(120,80,40,.22)'); g.fillStyle = vg; g.fillRect(0, 0, VW, VH);
+};
+function drawOutroWords(ctx, t) {
+  for (const o of TL.outroWords || []) {
+    if (t < o.t) continue;
+    letters(ctx, o.text, o.x, o.y, { size: o.size, p: seg(t, o.t, o.t + o.d), seed: o.seed, col: o.col ? C[o.col] : C.line, scaleOf: () => 1 + bounce(t, o.t + o.d, .5, .2) });
+  }
+}
+function confetti(t) {
+  if (!TL.yay || t < TL.yay) return;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  const r = mulberry(99);
+  for (let i = 0; i < 70; i++) {
+    const t0 = TL.yay + r() * .8, x = r() * VW, y0 = -50 - r() * 300, sp = 250 + r() * 300, col = RAINBOW[i % 7], k = r();
+    if (t < t0) continue;
+    const y = y0 + (t - t0) * sp; if (y > VH + 60) continue;
+    scribble(g, x + Math.sin(t * 3 + i) * 30, y, 16 + k * 10, 10 + k * 8, col, 9000 + i + BOIL, 1, 7);
+  }
+}
+
+// camera: monotone-smoothed keys from the timeline (24 fps smooth, never stepped)
+let camAt = () => ({ x: 1920, y: 1080, z: .5 });
+function buildCam(keys) {
+  keys = keys.slice().sort((a, b) => a.t - b.t);
+  return t => {
+    if (t <= keys[0].t) return { ...keys[0] };
+    for (let i = 0; i < keys.length - 1; i++) {
+      const a = keys[i], b = keys[i + 1];
+      if (t < b.t) {
+        const u = eio(seg(t, a.t, b.t)), lz = lerp(Math.log(a.z), Math.log(b.z), u);
+        return { x: lerp(a.x, b.x, u), y: lerp(a.y, b.y, u), z: Math.exp(lz) };
+      }
+    }
+    return { ...keys[keys.length - 1] };
+  };
+}
+
+// ---------- boot ----------
+(async () => {
+  TL = await (await fetch('timeline.json')).json();
+  window.DUR = TL.dur;
+  T.hillT0 = TL.intro.hillT0; T.hillT1 = TL.intro.hillT1; T.starsT = TL.intro.starsT;
+  T.treeT = TL.numbers[2].letters[0] - .2; T.houseT = TL.numbers[9].letters[0] - 2.4;
+  T.nightT0 = TL.night[0]; T.nightT1 = TL.night[1];
+  T.pulses = {}; for (let n = 1; n <= 10; n++) T.pulses[n] = [];
+  for (const p of TL.pulses) T.pulses[p.n].push(p.t);
+  for (const N of TL.numbers) for (const w of N.words) T.pulses[N.n].push(w);
+  for (let n = 1; n <= 10; n++) T.pulses[n].sort((a, b) => a - b);
+  camAt = buildCam(TL.camera);
+  await document.fonts.load('700 100px Gaegu'); await document.fonts.load('54px PatrickHand');
+  window.TEXTS = t => TL.subs.filter(s => t >= s.t0 && t <= s.t1).map((s, i) => ({ id: 'sub' + s.t0, text: s.text, x0: 200, y0: VH - 140, x1: VW - 200, y1: VH - 44 }));
+  window.READY = true;
+  if (!navigator.webdriver) { const t0 = performance.now(); const loop = () => { window.render(((performance.now() - t0) / 1000 + +(new URLSearchParams(location.search).get('t') || 0)) % TL.dur); requestAnimationFrame(loop); }; loop(); }
+})();
+</script></body></html>

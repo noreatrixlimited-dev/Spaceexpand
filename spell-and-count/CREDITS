@@ -1,0 +1,16 @@
+Spell and Count! — music video
+
+Song: "Spell and Count!" by jeevankumar123, made with Suno (the user's own track, used as supplied).
+
+Fonts (SIL Open Font License 1.1, files and licences in fonts/):
+- Gaegu Bold, by JIKJI SOFT — https://github.com/google/fonts/tree/main/ofl/gaegu
+- Patrick Hand, by Patrick Wagesreiter — https://github.com/google/fonts/tree/main/ofl/patrickhand
+
+Pictures: drawn entirely in code (index.html); no images, stock footage or video generation.
+
+Analysis tools (not in the film):
+- librosa (ISC) — beat, tempo, chroma, self-similarity
+- Whisper small.en (OpenAI, MIT) run offline through sherpa-onnx (Apache-2.0), model from github.com/k2-fsa/sherpa-onnx releases
+- ffmpeg (LGPL/GPL) — loudness, spectrogram, mux
+
+Render pipeline: Lemo-Opuscar library core tools (MIT), github.com/lemomo-ai/lemo-opuscar
